@@ -60,6 +60,9 @@ list, so every later call returns the polluted one.
 `linear:scaleWeights(0.01)` on a policy head makes the policy start undecided rather than
 opinionated — small change, large effect on early PPO.
 
+`nn.LayerNorm` runs on the fused kernel: 88.2 us forward+backward at `{32,64}`, against
+568 us for the composition it replaced.
+
 **LayerNorm, not BatchNorm.** BatchNorm's statistics depend on the other samples in the
 batch, so a network behaves differently at batch 1 than at 32 — fatal for RL, where you
 act on one observation and train on many. LayerNorm's statistics come from within the
