@@ -13,8 +13,8 @@ braces. `T.new({0.3, 0.7})` is a `{2}` vector, and `matmul` requires two 2D tens
 
 **`toFlat()` returns a buffer, `toTable()` a Lua array.** Passing the former where an array
 is expected fails silently in any loop that uses `#`. Indexing it raises "attempt to index
-buffer with number" — `action[1]` on a `toFlat()` result. This survived the buffer
-migration in `NanoWorker` precisely because nothing tested it.
+buffer with number" — `action[1]` on a `toFlat()` result. The failure is easy to miss for a
+long time, because the loop that swallows it does not complain.
 
 ## Autograd
 
