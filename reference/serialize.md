@@ -11,7 +11,7 @@ local serialize = nano.serialize
 | Member | Description |
 | --- | --- |
 | `serialize.toTable(model, metadata?)` → `table` | Full-precision plain table, with optional metadata attached. Also `nano.save`. |
-| `serialize.fromTable(model, state)` → `boolean` | Load from a table. Also `nano.load`. |
+| `serialize.fromTable(model, state)` → `boolean` | Load from a table. Also `nano.load`. **Errors** on architecture mismatch rather than returning `false` — wrap in `pcall` if a mismatch is expected. |
 | `serialize.toString(model, metadata?)` → `string` | JSON-encoded string, for DataStores. |
 | `serialize.fromString(model, encoded)` → `boolean` | Load from a string. |
 | `serialize.toBase64(model)` → `{shapes: {{number}}, data: string}` | Compact float32 encoding. |
@@ -43,8 +43,10 @@ deployed policy and wrong for a checkpoint you intend to resume exact training f
 
 ## Every format checks architecture
 
-All three carry an architecture fingerprint and **refuse to load on mismatch**, returning
-`false` rather than corrupting the model.
+All three carry an architecture fingerprint and **refuse to load on mismatch**. The refusal
+is an **error**, not a `false` return, and it names the offending parameter and both sizes.
+Wrap the load in `pcall` if a mismatch is possible — for example when loading a model whose
+architecture may have changed since it was saved.
 
 This is the reason to use `serialize` over `model:setFlat`. Plain `getFlat`/`setFlat` will
 happily load a 64-hidden genome into a 48-hidden network and produce a model that runs and
