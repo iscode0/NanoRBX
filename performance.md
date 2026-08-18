@@ -74,9 +74,9 @@ Per-change, measured in isolation:
 
 ## The two that did not go as predicted
 
-**The buffer migration overdelivered.** `BenchBuffer` measured matmul alone with
-pre-allocated buffers and predicted 1.5-1.8x end to end; the actual was 2.80x. The isolated
-benchmark could not see the allocation and locality gains across the rest of the graph.
+**The buffer migration overdelivered.** Measuring matmul alone with pre-allocated buffers
+predicted 1.5-1.8x end to end; the actual was 2.80x. The isolated measurement could not see
+the allocation and locality gains across the rest of the graph.
 
 **The `nn.compile` rewrite was worth 2.45x, and the reason was embarrassing.** `compile`
 was supposed to beat a `noGrad` forward at batch 1. It lost to it, by 1.7x. The cause was
@@ -128,9 +128,8 @@ two full reduction passes.
 **One checksum moved, by exactly one ulp.** The fused forward differs from the composed
 chain in the last bit: it computes `1/sqrt(var + eps)` once per row and multiplies, where
 the composition divides per element. Multiply-by-reciprocal and divide disagree on about
-27% of inputs by 1 ulp. That is a real numerical difference, correctly flagged by the
-benchmark checksums, and the right call is to accept it — the equivalence tests agree to
-1e-9 and the division count per row dropped from H to 1.
+27% of inputs by 1 ulp. That is a real numerical difference and the right call is to accept
+it — the two paths agree to 1e-9 and the division count per row dropped from H to 1.
 
 ## Transposing without index arithmetic
 
@@ -177,9 +176,8 @@ which is why 100 sequential compiled NPCs (437-444 us) now beat one batched forw
 the same 100 observations (510-537 us) despite making a hundred separate calls.
 
 One incidental result worth keeping: the compiled function and the batched forward returned
-**bit-identical** output on the same input — agreement to all 17 digits across two
-unrelated code paths. That is a stronger correctness signal than the tolerance check in
-`EdgeSuite`, and it came free from the benchmark's checksums.
+**bit-identical** output on the same input — agreement to all 17 digits across two unrelated
+code paths, which is a stronger correctness signal than any tolerance check.
 
 ## Where the time goes now
 
@@ -235,9 +233,6 @@ profiling shows graph construction, not arithmetic, dominating — which it curr
 not.
 
 ## Measuring your own changes
-
-`BenchPerf` measures the optimisations end to end; `BenchBuffer` compares storage
-strategies in isolation.
 
 Two Roblox-specific caveats. `collectgarbage("collect")` is blocked — only `gcinfo()` and
 `"count"` are available, so allocation measurements have no clean baseline. And an isolated
