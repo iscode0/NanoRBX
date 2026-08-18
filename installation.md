@@ -90,20 +90,6 @@ client.
 `ReplicatedStorage` or `ServerStorage` — a pool parented into an inert container looks
 completely healthy and never completes a single job.
 
-## Development scripts
-
-Optional, all Scripts in `ServerScriptService`:
-
-| Script | Purpose |
-| --- | --- |
-| `TestTensor` | Verify the Tensor core alone. Run this first. |
-| `TestGradients` | Verify every backward pass. Run after any change to one. |
-| `BenchPerf` | Measure the optimisations. |
-| `BenchBuffer` | Compare table against buffer storage. |
-| `PPOBenchmark` | End-to-end PPO and SAC training. |
-
-See [Testing](testing.md) for what each one proves.
-
 ## Verify the install
 
 ```lua
