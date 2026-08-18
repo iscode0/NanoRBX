@@ -1,0 +1,151 @@
+# Performance
+
+Every number here was measured, not estimated. Two of them contradicted the prediction that
+motivated the change, which is the main reason this page exists in this form.
+
+## What makes it fast
+
+**Batch everything.** One `{32, 8}` forward is roughly a thirtieth the cost of thirty-two
+`{1, 8}` passes, because per-operation overhead dominates at these sizes. A per-sample loop
+in your training step *is* your bottleneck.
+
+**Use `noGrad` for anything you will not differentiate.** Rollout collection, evaluation,
+deployed inference, every evolutionary fitness evaluation. Tracking off means an operation
+allocates its output and nothing else.
+
+**Keep tensors contiguous.** Every fast path checks `_contig`.
+
+**Direct arithmetic beats closures.** Luau cannot fastcall or inline an indirect call, so a
+closure passed as a parameter costs a full CALL per element. Hot arithmetic and the common
+activations use opcode-selected loops where the branch happens once per operation rather
+than once per element.
+
+**`--!native` on the numeric modules.** Verify with the Script Profiler that `Adam.step` and
+the loss forwards show `<native>`; if not, a type misprediction is de-optimizing them.
+Watch the budget with `debug.dumpcodesize()` in Server view. Wrong annotations are worse
+than none — under native codegen they dictate the generated machine code.
+
+Native codegen is server-side only. Client scripts run the same code interpreted.
+
+## Yielding
+
+Yield on a **time budget**, never a step count:
+
+```lua
+local budget = os.clock() + 0.008
+if os.clock() > budget then
+    task.wait()
+    budget = os.clock() + 0.008
+end
+```
+
+A step triggering a gradient update costs ~100x a plain environment step, so a fixed step
+count either stalls the server during update-heavy stretches or wastes most of the frame
+during cheap ones. Measuring elapsed time adapts automatically.
+
+Use a coarser budget (~30 ms) during update phases than during rollout — nothing is
+watching the world while it learns. `train.Trainer` handles this for you.
+
+## Measured results
+
+Post-migration, on an 8-64-64-2 network at batch 32:
+
+| | before | after | gain |
+| --- | --- | --- | --- |
+| Train step | 2.32 ms | **0.83 ms** | **2.80x** |
+| Forward, no grad | 0.79 ms | **0.24 ms** | **3.29x** |
+| Updates/sec | 431 | **1208** | 2.80x |
+
+Per-change, measured in isolation:
+
+| change | gain |
+| --- | --- |
+| Huber loss fwd+bwd (fused) | **5.8x** |
+| MSE loss fwd+bwd (fused) | **3.2x** |
+| `zeroGrad` set-to-none | 2.7x (both sides near timer resolution) |
+| Linear fwd+bwd (fused) | 1.06x |
+| Matmul inner loop (4x unroll) | 1.02x |
+| dW loop order (i-outer) | 1.01x |
+
+## The two that did not go as predicted
+
+**The buffer migration overdelivered.** `BenchBuffer` measured matmul alone with
+pre-allocated buffers and predicted 1.5-1.8x end to end; the actual was 2.80x. The isolated
+benchmark could not see the allocation and locality gains across the rest of the graph.
+
+**The dW loop-order fix was a nothing.** Switching from p-outer to i-outer makes reads of
+`x` sequential instead of strided by `k`, which sounded like an 8x reduction in cache lines
+touched. It measured 1.01x.
+
+The strided read happens once per (i, p) and is amortised over `m` inner iterations, so it
+is about 1.5% of the work — the cache-line analysis was applied to the wrong loop level,
+and a 64 KB working set mostly sits in L2 regardless. The swap is kept because it is never
+slower and the stride would matter at large `k`, but it is not a win.
+
+The pattern is consistent and worth internalising: **fusion pays where node count dominates
+arithmetic.** Huber composed was 7 graph nodes over 512 elements, so removing 6 removed 6/7
+of the cost. A `Linear` layer is one matmul where the fused bias is 1.6% of the work, so
+fusing it saved the node, not the math.
+
+## Where the time goes now
+
+| | ms | share |
+| --- | --- | --- |
+| Forward (nograd) | 0.81 | 34% |
+| Graph + backward + optimizer | 1.51 | 66% |
+
+Backward is almost exactly 2x forward flops — it computes both `dX` and `dW` — which the
+measurement confirms at 1.88x.
+
+**The train step is now matmul, end to end**, at roughly 4.6 ns per multiply-add. That is
+about 14 cycles, which is not the arithmetic. It is the read, multiply-add, and write.
+
+Unrolling the inner loop 4x gained 6% at width 64 and 7% at width 128. Identical gain at
+both widths means loop overhead is only ~8% of the body; the rest is storage access.
+**Loop-level optimisation is exhausted.**
+
+## Why buffers, and why f64
+
+Measured before migrating, not after:
+
+| access pattern | table vs buffer |
+| --- | --- |
+| Sequential read | 1.02x |
+| Sequential write | 1.01x |
+| Read-modify-write | 1.53x |
+| Full matmul | **1.82x** |
+
+Pure sequential access is a wash. The win appears exactly where Nano lives, since
+`out[i] += a * b[j]` is a read-modify-write inside a matmul, and matmul is essentially 100%
+of a training step.
+
+**It had to be f64.** float32 puts 0.14% error on a central difference against a 2e-4
+gradcheck tolerance, so every one of the 110 gradient checks would have failed. f64 proved
+**bit-identical** to table arithmetic — the agreement check reported a worst element
+difference of exactly zero — which is what made a 2,200-line rewrite verifiable rather than
+hopeful. Memory halved as a side effect: 8 bytes per element against a 16-byte TValue.
+
+A partial migration was tested and rejected: converting at the boundary costs 8.7% overall,
+but a 64→2 layer pays 55% overhead to save 45%. It is all-or-nothing.
+
+## Remaining headroom
+
+**Tensor pooling — open.** Every op allocates a fresh table, and a high allocation rate
+forces GC assists that interrupt the script. Shapes are fixed in a training loop, so a free
+list keyed by element count would recycle them. Needs an explicit arena scope with a hard
+contract about escaping values; recycling a still-referenced tensor corrupts silently.
+
+**Static graph replay — open.** Record the op sequence once for a fixed-shape loop and
+replay it against pooled buffers. Largest possible win, largest effort. Only worth it if
+profiling shows graph construction, not arithmetic, dominating — which it currently does
+not.
+
+## Measuring your own changes
+
+`BenchPerf` measures the optimisations end to end; `BenchBuffer` compares storage
+strategies in isolation.
+
+Two Roblox-specific caveats. `collectgarbage("collect")` is blocked — only `gcinfo()` and
+`"count"` are available, so allocation measurements have no clean baseline. And an isolated
+microbenchmark systematically under-predicts allocation and locality effects, as the buffer
+migration demonstrated by a wide margin. Measure end to end before believing a number.
