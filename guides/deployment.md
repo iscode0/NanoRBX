@@ -223,8 +223,8 @@ That is comfortable. A training step in the same frame is not — 0.633 ms is an
 and it is the step that spikes, so put training behind a time budget rather than running it
 inline.
 
-Measure on your own hardware before planning around these. They come from `BenchSuite`,
-which prints the same table for your machine.
+Measure on your own hardware before planning around these. They were taken on a reference
+server and the ratios matter more than the absolute numbers.
 
 If you train live in a running experience, yield on a time budget:
 
