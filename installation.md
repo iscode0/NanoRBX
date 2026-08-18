@@ -17,8 +17,54 @@ local nano = require(game:GetService("ReplicatedStorage").Nano)
 
 Verify with the snippet at the bottom of this page before writing anything against it.
 
-> Rojo and Wally support are planned. Until then the Toolbox model and the manual tree
-> below are the two supported paths.
+## With Wally
+
+Add Nano to your `wally.toml`:
+
+```toml
+[dependencies]
+Nano = "iscode0/nano@3.4.0"
+```
+
+Then `wally install`. The package lands in `Packages/`, which Rojo maps into
+`ReplicatedStorage.Packages`:
+
+```lua
+local nano = require(ReplicatedStorage.Packages.Nano)
+```
+
+**If you use `parallel`, edit `NanoWorker` first.** It ships with
+`require(ReplicatedStorage.Nano)` hard-coded at the top, which does not exist under Wally.
+Point it at `ReplicatedStorage.Packages.Nano` instead. `NanoWorker` is a template you are
+expected to edit anyway — its handlers are examples — so this is the same file you would
+already be opening.
+
+## With Rojo, from source
+
+Clone the repo and point your project at `src`:
+
+```json
+{
+  "name": "YourGame",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Nano": { "$path": "path/to/NanoRBX/src" }
+    }
+  }
+}
+```
+
+`src/init.lua` becomes the `Nano` ModuleScript and every sibling becomes a child of it,
+which is exactly the tree below. `src/NanoWorker.meta.json` sets `Disabled = true` on the
+worker, so you do not have to remember to.
+
+To build the Toolbox model instead of syncing:
+
+```sh
+rojo build -o Nano.rbxmx
+```
 
 ## Manual installation
 
