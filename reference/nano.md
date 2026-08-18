@@ -28,7 +28,7 @@ local nano = require(game:GetService("ReplicatedStorage").Nano)
 
 | Member | Description |
 | --- | --- |
-| `nano.VERSION: string` | Version string, currently `"3.3.0"`. |
+| `nano.VERSION: string` | Version string, currently `"3.4.0"`. |
 
 ## Construction shorthand
 
