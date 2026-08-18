@@ -11,7 +11,9 @@ and a benchmark harness.
 | `TestAdditions` | 47 | Seeding, Trainer, diagnose, PER, compile |
 | `TestRecurrent` | 16 | RecurrentPPO on a provable memory task |
 | `EdgeSuite` | 169 | Adversarial edge cases: degenerate shapes, aliasing, numeric extremes, contract violations, determinism |
-| `BenchSuite` | 66 cases | Timing and allocation, with checksums that catch a change in behaviour |
+| `BenchSuite` | 70 cases | Timing and allocation, with checksums that catch a change in behaviour |
+| `ParallelSuite` | 21 | The Actor boundary: pool construction, handler binding, seed propagation, weight transport |
+| `NativeCheck` | — | Sustained load so the Script Profiler can confirm native codegen |
 
 All are Scripts in `ServerScriptService`.
 
@@ -60,6 +62,79 @@ independent runs, so a moved checksum is signal rather than noise.
 
 Read `CV` before any timing: above 10% the harness marks the row `NOISY`, and sub-10us
 cases routinely land there.
+
+If more than 30% of cases come back noisy, the emitted baseline is **labelled unfit and
+should not be pasted in**. A noisy baseline is worse than no baseline: every later diff is
+measured against inflated medians, so real regressions read as wins and real wins read as
+noise. The run is still readable case by case — it just must not become the reference. Runs
+in this project have ranged from 23 to 40 noisy cases out of 70 depending on what else was
+executing, so this is a live concern rather than a theoretical one.
+
+## ParallelSuite
+
+**Needs its own setup**, because it needs a worker template:
+
+```
+ServerScriptService
+    ParallelSuite            (Script)
+        ParallelTestWorker   (Script, Enabled = false)
+```
+
+Every Actor is its own Lua VM, and nothing in the other suites crosses that boundary — so
+nothing in them can catch the failure this library is most prone to: code that works in
+every serial test and dies inside a worker, silently, as a job that never returns.
+
+The main subject is **seed propagation**, which each Actor needs because it loads its own
+copy of `Config` with its own unseeded `Random`. The suite checks that every worker reports
+a seed, that worker `i` receives `base + i` rather than `base` (identical seeds would make a
+population of N evaluate N copies of one rollout), that the same seed reproduces every
+worker's stream across separate pools, and — the control — that a *different* seed produces
+a different one. Without that last check, a pool that ignored seeding entirely and drew a
+fixed sequence would pass.
+
+It deliberately does **not** use the shipped `NanoWorker`, whose handlers are deterministic
+given their input and therefore cannot detect whether the RNG inside an Actor was ever
+seeded.
+
+**None of the seed assertions read global state.** `nano.seed` is global to the server and
+`Pool.new` reads it at construction, so an earlier version of this suite asserted literal
+bases — seed 4242, build, expect `4242 + i` — and failed twice when run alongside
+`BenchSuite`, which reseeds before every one of its 70 cases. The library was correct; the
+test was reading a global another script owned. It now asserts the *pattern* — every
+worker's seed minus its index is one constant — and drives every reproducibility check
+through `seedWorkers` explicitly, so the suite is safe to run concurrently.
+
+Also covered: the constructor guards (ModuleScript template, inert parents), that an
+unbound topic surfaces as a warned timeout rather than a freeze, that `packWeights` crosses
+the boundary intact, and a live probe confirming `require` is still refused in a
+desynchronized handler — reported as a finding if it ever starts succeeding, since that
+would mean the eager-require workarounds could be revisited.
+
+## NativeCheck
+
+Not a test. Luau exposes no runtime query for "is this function natively compiled", so the
+only way to find out is the Script Profiler, which samples running code and therefore needs
+the code to be running. This spins `Tensor.matmul`, `F.linear`, the fused losses,
+`F.layerNorm`, `Adam.step` and a full train step for four seconds each, and prints the
+checklist to read the profiler against.
+
+Run it on the **server**, and run it **alone** — another suite executing at the same time
+lands in the same profile and makes the tree much harder to read. Native codegen is
+server-side only, so a client run measures the interpreter.
+
+The iteration counts it prints include the `task.wait()` yields the loop must make to stay
+responsive. They are a liveness signal, not a timing; `BenchSuite` is the timing tool and
+calibrates around the yields.
+
+`debug.dumpcodesize()` is Command Bar only and refuses to run from a Script. The output
+tells you so and gives you the line to paste.
+
+A function without `<native>` beside it is being interpreted despite the `--!native` on its
+module, and the usual cause is a type annotation that disagrees with the actual value. This
+is not hypothetical: four sites in `optim.lua` declared optimizer state as `{{number}}` when
+it is `{buffer}`, and `Adam.step` is precisely the function the performance docs tell you to
+verify. That was corrected in 3.4.0, and this script is how you find out whether it was the
+thing blocking codegen.
 
 ## TestTensor
 
