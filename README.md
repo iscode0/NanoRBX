@@ -89,7 +89,6 @@ Every module, every public function and field, each with an immediate descriptio
 | page | what it covers |
 |---|---|
 | [Performance](performance.md) | What is fast, what is slow, and what was measured |
-| [Testing](testing.md) | The test scripts, what each proves, when to run them |
 | [Gotchas](gotchas.md) | Every mistake that produces wrong results without an error |
 
 ---
