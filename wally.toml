@@ -1,0 +1,19 @@
+[package]
+name = "iscode0/nano"
+description = "A self-contained ML / DL / RL library for Roblox Luau. Tensors with reverse-mode autograd, layers, optimizers, RNNs, PPO/SAC/DQN, and Actor-based parallelism."
+version = "3.4.0"
+license = "MIT"
+authors = ["iscode0"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"
+exclude = ["**"]
+include = [
+  "src",
+  "src/**",
+  "default.project.json",
+  "wally.toml",
+  "README.md",
+  "LICENSE",
+]
+
+[dependencies]
