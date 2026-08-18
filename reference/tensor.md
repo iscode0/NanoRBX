@@ -105,14 +105,24 @@ Four dispatch paths are chosen once per op: scalar → identical contiguous shap
 `safeExp` exists because a policy's log-std can spike early in training, and a plain `exp`
 gives `inf` → `nan` → a permanently dead network with no error anywhere.
 
+The rest follow IEEE semantics and are **not** guarded, because the guard would have to
+guess: `exp(1000)` is `inf`, `log(0)` is `-inf`, `log(-1)` and `sqrt(-1)` are `nan`, and
+`x/0` is `inf`. None of these throw, and a `nan` reaching a layer propagates through every
+output. If your inputs can reach these values, check them before they reach a tensor —
+`train.diagnose` reports non-finite counts per parameter.
+
+`sqrt` has an infinite derivative at zero, which is correct rather than a defect.
+[`F.norm`](functional.md) and `F.cosineSimilarity` add an epsilon inside the square root
+for exactly this reason, so the norm of a zero vector has a gradient of 0, not `inf`.
+
 ## Reductions
 
 | Member | Description |
 | --- | --- |
 | `T.sum(a, dim?, keepdim?)` → `Tensor` | Sum, over everything or along one dimension. |
-| `T.mean(a, dim?, keepdim?)` → `Tensor` | Mean, over everything or along one dimension. |
+| `T.mean(a, dim?, keepdim?)` → `Tensor` | Mean, over everything or along one dimension. Errors on an empty tensor rather than returning `nan`. |
 | `T.max(a, dim?)` → `(Tensor, {number})` | Maximum values and their argmax indices. |
-| `T.argmax(a)` → `number` | Flat index of the largest element. |
+| `T.argmax(a)` → `number` | Flat index of the largest element. Errors on an empty tensor. |
 
 ## Softmax family
 
