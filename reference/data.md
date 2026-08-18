@@ -24,8 +24,9 @@ Rows of features with matching targets. Targets may be rows (regression) or plai
 split on sorted data gives a validation set containing classes the model never trained on
 — which reports as a catastrophically broken model rather than a data-handling mistake.
 
-Pass `seed` to make the split reproducible. This shuffle uses its own `Random` and is
-**not** covered by `nano.seed`.
+Pass `seed` to give the split a private stream, so it stays identical even if the amount
+of global randomness drawn beforehand changes. With no seed it draws from the shared
+stream, so `nano.seed` still covers it.
 
 ## Loader
 
@@ -50,7 +51,7 @@ end
 `Y` comes back as a Tensor for row targets and a plain array for class indices, matching
 what `MSELoss` and `CrossEntropyLoss` respectively expect.
 
-`iter` shuffles with `math.random`, which is not covered by `nano.seed`.
+`iter` shuffles through the shared seeded stream, so `nano.seed` covers minibatch order.
 
 ## Scaler
 
