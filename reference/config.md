@@ -48,6 +48,9 @@ how many samples were drawn before. Determinism is worth more than the saved cos
 `data.Loader:iter()` included — they used to call `Random.new` and `math.random` directly,
 which meant a seeded run reproduced its weights but not the order they were trained on.
 
+Worker Actors are covered too: `parallel.Pool.new` forwards the seed across the actor
+boundary, since each Actor loads its own copy of this module with its own unseeded `Random`.
+
 `Config.stream(seed)` is the deliberate exception: `Dataset:split(fraction, seed)` uses it
 so a split stays identical even if the amount of global randomness drawn before it
 changes.
