@@ -60,6 +60,7 @@ Per-change, measured in isolation:
 
 | change | gain |
 | --- | --- |
+| `nn.compile` rewrite (batch-1, hidden 64) | **2.45x** |
 | Huber loss fwd+bwd (fused) | **5.8x** |
 | MSE loss fwd+bwd (fused) | **3.2x** |
 | `zeroGrad` set-to-none | 2.7x (both sides near timer resolution) |
@@ -72,6 +73,18 @@ Per-change, measured in isolation:
 **The buffer migration overdelivered.** `BenchBuffer` measured matmul alone with
 pre-allocated buffers and predicted 1.5-1.8x end to end; the actual was 2.80x. The isolated
 benchmark could not see the allocation and locality gains across the rest of the graph.
+
+**The `nn.compile` rewrite was worth 2.45x, and the reason was embarrassing.** `compile`
+was supposed to beat a `noGrad` forward at batch 1. It lost to it, by 1.7x. The cause was
+not subtle: `F.linear` unrolls its inner loop 4x and skips zero multiplicands, and
+`compile` did neither — so the "optimized" inference path ran a naive matmul while the
+ordinary path ran the tuned one. Nothing caught it because nothing compared the two.
+
+Porting the unroll, and hoisting the per-step table lookups and buffer ping-pong into
+compile-time parallel arrays, took it from 10.5 us to **4.29 us** on an 8-64-64-2 batch-1
+forward — 2.45x against its old self, and 1.50x against `noGrad`, which is what it was
+always supposed to be. The lesson is not about unrolling; it is that a fast path nobody
+benchmarks against the slow path is an assumption, not an optimisation.
 
 **The dW loop-order fix was a nothing.** Switching from p-outer to i-outer makes reads of
 `x` sequential instead of strided by `k`, which sounded like an 8x reduction in cache lines
@@ -86,6 +99,35 @@ The pattern is consistent and worth internalising: **fusion pays where node coun
 arithmetic.** Huber composed was 7 graph nodes over 512 elements, so removing 6 removed 6/7
 of the cost. A `Linear` layer is one matmul where the fused bias is 1.6% of the work, so
 fusing it saved the node, not the math.
+
+## Compiled inference
+
+`nn.compile` against a `noGrad` forward, batch 1, after the rewrite:
+
+| network | forward | compile | gain |
+| --- | --- | --- | --- |
+| 8-32-32-2 | 3.7 us | **1.46 us** | ~2.5x |
+| 8-64-64-2 | 6.4 us | **4.24 us** | ~1.5x |
+| 8-128-128-2 | 15.6 us | **11.3 us** | ~1.4x |
+
+Two independent runs agreed to within 4%. The compiled column is the steadier of the two
+(4-6% CV against 12-18% for the forward), so the uncertainty in the ratio sits almost
+entirely in the denominator — round these rather than quoting them.
+
+The gain **shrinks as the network widens**, and that is the diagnostic, not a
+disappointment. What `compile` removes is per-operation overhead — a fixed cost per layer,
+independent of width. Once arithmetic dominates, both paths run the same unrolled inner
+loop and converge. If the ratio ever grows with width, something is wrong with the ordinary
+path.
+
+It also allocates **nothing** per call, measured at 0.00 kb/op across every compiled case,
+which is why 100 sequential compiled NPCs (437-444 us) now beat one batched forward over
+the same 100 observations (510-537 us) despite making a hundred separate calls.
+
+One incidental result worth keeping: the compiled function and the batched forward returned
+**bit-identical** output on the same input — agreement to all 17 digits across two
+unrelated code paths. That is a stronger correctness signal than the tolerance check in
+`EdgeSuite`, and it came free from the benchmark's checksums.
 
 ## Where the time goes now
 
