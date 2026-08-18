@@ -118,9 +118,29 @@ local out = fast(obs)              -- {number} -> {number}
 ```
 
 Walks a `Sequential` once and returns a plain function holding only weights and two
-reusable scratch buffers, ping-ponged between layers. No Tensor objects, no per-call
-allocation, no graph. Measured **1.3-1.5x** on a batch-1 forward, which takes 100 NPCs at
-60fps from ~4% of the frame budget to ~2.8%.
+reusable scratch buffers. Everything fixed at compile time — the layer kind, the weight
+buffers, the widths, and which scratch buffer each step reads and writes — is resolved
+into parallel arrays, so the forward has no hash lookups, no string compares and no buffer
+swapping. The inner loop is 4x unrolled with a zero-skip, matching `F.linear`.
+
+No Tensor objects, no graph, and **zero allocation per call** (measured at 0.00 kb/op).
+
+Measured against a `noGrad` forward at batch 1:
+
+| network | forward | compile | gain |
+| --- | --- | --- | --- |
+| 8-32-32-2 | 3.7 us | **1.46 us** | ~2.5x |
+| 8-64-64-2 | 6.4 us | **4.24 us** | ~1.5x |
+| 8-128-128-2 | 15.6 us | **11.3 us** | ~1.4x |
+
+Two independent runs agreed to within 4%. The compiled column is the steadier of the two
+(4-6% CV against 12-18% for the forward), so the uncertainty in the ratio sits almost
+entirely in the denominator — round these rather than quoting them.
+
+The gain shrinks as the network widens, which is the shape you should expect: what
+`compile` removes is per-operation overhead, and that is a fixed cost. Once the arithmetic
+dominates, both paths run the same unrolled loop. It pays most where it is most often
+used — many small networks.
 
 Supports `Linear` plus `ReLU`, `Tanh`, `Sigmoid`, `LeakyReLU`, `GELU`, `SiLU`/`Swish` and
 `Softplus`. Anything else — including `Mish`, `ELU`, `HardSigmoid`, `Dropout`,
