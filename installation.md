@@ -1,6 +1,26 @@
 # Installation
 
-## The tree
+## From the Toolbox (recommended)
+
+Nano is published as a Roblox model. In Studio, open the Toolbox, search by asset ID
+`138581366222476`, and insert it — or paste the ID into the Toolbox search bar directly.
+
+Insertion drops the model wherever your current selection is, so **move the `Nano`
+ModuleScript into `ReplicatedStorage`** afterwards. Everything else comes parented
+correctly underneath it, including `NanoWorker` with `Enabled` already set to `false`.
+
+Then:
+
+```lua
+local nano = require(game:GetService("ReplicatedStorage").Nano)
+```
+
+Verify with the snippet at the bottom of this page before writing anything against it.
+
+> Rojo and Wally support are planned. Until then the Toolbox model and the manual tree
+> below are the two supported paths.
+
+## Manual installation
 
 Place the library in `ReplicatedStorage` with this exact structure:
 
