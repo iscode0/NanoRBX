@@ -60,6 +60,10 @@ Per-change, measured in isolation:
 
 | change | gain |
 | --- | --- |
+| `transpose` {64,64} forward (2D path) | **9.9x** |
+| Fused LayerNorm, forward | **9.1x** |
+| Fused LayerNorm, fwd+bwd | **6.4x** |
+| `transpose` {64,64} fwd+bwd | **5.5x** |
 | `nn.compile` rewrite (batch-1, hidden 64) | **2.45x** |
 | Huber loss fwd+bwd (fused) | **5.8x** |
 | MSE loss fwd+bwd (fused) | **3.2x** |
@@ -99,6 +103,54 @@ The pattern is consistent and worth internalising: **fusion pays where node coun
 arithmetic.** Huber composed was 7 graph nodes over 512 elements, so removing 6 removed 6/7
 of the cost. A `Linear` layer is one matmul where the fused bias is 1.6% of the work, so
 fusing it saved the node, not the math.
+
+## Fusing LayerNorm
+
+The composed form was nine graph nodes — `mean`, `sub`, `mul`, `mean`, `add`, `sqrt`,
+`div`, `mul`, `add` — each allocating an intermediate tensor and a backward closure over
+every element. At `{32,64}` that cost **568 us** forward+backward, which was nine tenths of
+a whole batch-32 training step through an 8-64-64-2 network. One normalisation layer cost
+about as much as training the network it sat in.
+
+| | before | after | gain |
+| --- | --- | --- | --- |
+| Forward only | 191.6 us | **21.1 us** | 9.1x |
+| `nn.LayerNorm` fwd+bwd | 568.0 us | **88.2 us** | 6.4x |
+
+Measured in the same run, the surviving composed chain costs 490.7 us against the fused
+kernel's 88.2 us — **5.6x**, with both paths on identical inputs.
+
+This is the Huber result again (7 nodes, 7.11x) and the rule it established holds: fusion
+pays where node count dominates arithmetic. The kernel keeps `xhat` and a per-row inverse
+standard deviation from the forward, costing `n + rows` of scratch and saving the backward
+two full reduction passes.
+
+**One checksum moved, by exactly one ulp.** The fused forward differs from the composed
+chain in the last bit: it computes `1/sqrt(var + eps)` once per row and multiplies, where
+the composition divides per element. Multiply-by-reciprocal and divide disagree on about
+27% of inputs by 1 ulp. That is a real numerical difference, correctly flagged by the
+benchmark checksums, and the right call is to accept it — the equivalence tests agree to
+1e-9 and the division count per row dropped from H to 1.
+
+## Transposing without index arithmetic
+
+`transpose {64,64}` cost **153 us** to move 4,096 numbers — 38 ns each, and within 4% of a
+full `{32,64}@{64,64}` matmul doing 131,072 multiply-adds.
+
+The forward called `unravel` per element, a division and modulo per dimension, then walked
+the stride array to build an offset. The backward was worse: it called `table.clone` once
+per element, allocating 4,096 throwaway tables on every backward pass.
+
+| | before | after | gain |
+| --- | --- | --- | --- |
+| `{64,64}` forward | 153.2 us | **15.5 us** | 9.9x |
+| `{64,64}` fwd+bwd | 451.0 us | **81.6 us** | 5.5x |
+| `{8,8,8}` 3D, general path | 22.9 us | 22.9 us | unchanged |
+
+For two dimensions the source offset advances by a fixed stride down each column, so it is
+a plain double loop with no division and no index array. The 3D case is the control: it
+still takes the general path and did not move, which is what rules out the 2D win having
+been bought at the general path's expense.
 
 ## Compiled inference
 
