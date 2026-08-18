@@ -107,9 +107,12 @@ end
 ```
 
 `compile` walks a `Sequential` once and returns a plain function holding only weights and
-two scratch buffers, ping-ponged between layers. No Tensor objects, no per-call allocation,
-no graph. Measured **1.3-1.5x** over a `noGrad` forward — which takes 100 NPCs at 60fps
-from about 4% of the frame budget to 2.8%.
+two scratch buffers. No Tensor objects, no graph, and zero allocation per call.
+
+Measured **~1.5x** over a `noGrad` forward on an 8-64-64-2 network at batch 1, rising to
+~2.5x on a narrower 8-32-32-2 and falling to ~1.4x at 8-128-128-2, across two runs. The win is per-operation
+overhead, which is a fixed cost, so it matters most on the small networks an NPC actually
+runs.
 
 **Check for `nil`.** It supports `Linear` plus `ReLU`, `Tanh`, `Sigmoid`, `LeakyReLU`,
 `GELU`, `SiLU`/`Swish` and `Softplus`. Anything else — `Mish`, `ELU`, `HardSigmoid`,
@@ -126,9 +129,15 @@ existed at compile time.
 
 Two shapes, depending on whether they act on the same tick.
 
-**Batched.** If your NPCs can act together, one batched forward is dramatically cheaper
-than N single ones — roughly a thirtieth of the cost at N=32, because per-operation
-overhead dominates at these sizes.
+**Batched.** For a *training* step or anything that builds a graph, batching is
+dramatically cheaper than N single passes — roughly a thirtieth of the cost at N=32,
+because per-operation overhead dominates at these sizes.
+
+For pure inference the two are now close, and compiled wins: 100 NPCs on an 8-64-64-2
+network cost **437-444 us compiled and sequential** against **510-537 us as one batched
+forward**, over two runs. Batching still avoids 100 separate calls, so prefer it when your NPCs act on the
+same tick — but it is no longer the obvious choice, and if staggering suits your game
+better you are not paying for it.
 
 ```lua
 local rows = table.create(#npcs)
@@ -203,13 +212,19 @@ Rough numbers on an 8-64-64-2 network:
 
 | operation | cost |
 |---|---|
-| Batch-32 forward, `noGrad` | 0.24 ms |
-| Batch-32 full train step | 0.83 ms |
-| Batch-1 forward, compiled | ~0.04 ms |
+| Batch-32 forward, `noGrad` | 0.147 ms |
+| Batch-32 full train step | 0.633 ms |
+| Batch-1 forward, `noGrad` | 0.0065 ms |
+| Batch-1 forward, compiled | 0.0043 ms |
+| 100 NPCs, compiled | 0.44 ms |
 
-At 60fps you have 16.6 ms per frame. A hundred compiled batch-1 forwards is roughly 4 ms —
-substantial but workable if nothing else is competing. Batch them or stagger them if it is
-not.
+At 60fps you have 16.6 ms per frame, so a hundred compiled NPCs is about **2.6%** of it.
+That is comfortable. A training step in the same frame is not — 0.633 ms is another 3.8%,
+and it is the step that spikes, so put training behind a time budget rather than running it
+inline.
+
+Measure on your own hardware before planning around these. They come from `BenchSuite`,
+which prints the same table for your machine.
 
 If you train live in a running experience, yield on a time budget:
 
