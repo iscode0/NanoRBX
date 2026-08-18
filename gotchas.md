@@ -122,6 +122,10 @@ enabled, destroy works — and every job silently times out.
 inside `parallel.lua` it refers to that ModuleScript, so `GetActor()` there always returns
 `nil`.
 
+**Seed before you build the pool.** Each Actor is a separate Lua VM with its own `Config`,
+so `nano.seed` after `Pool.new` reaches the server and not the workers. `Pool.new`
+propagates whatever seed is in force at construction time.
+
 **An Actor drops any message whose topic has no handler bound yet.** No queue, no error on
 either side. `Pool.new` calls `waitReady` for you; if you construct actors by hand, wait
 before dispatching.
