@@ -141,9 +141,9 @@ exploration, and it belongs in training.
 
 ## Reproducibility
 
-**`nano.seed` does not cover two shuffles.** `Dataset:split(fraction, seed)` takes its own
-seed argument, and `data.Loader:iter()` uses `math.random`. Neither replays from the global
-seed.
+**Seed before you build anything.** `nano.seed` covers every random source in the library,
+including tensor init — which happens at construction, so seeding after you build the model
+does not reproduce its starting weights.
 
 ## Luau and Roblox
 
