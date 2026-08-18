@@ -35,7 +35,7 @@ local train, valid = dataset:split(0.8, 12345)
 ```
 
 80% to train on, 20% held back to measure honestly. The explicit seed makes the split
-reproducible across runs — it takes its own seed and is not covered by `nano.seed`.
+reproducible across runs, and independent of how much randomness was drawn before it.
 
 The split shuffles, which matters more than it sounds. Data arrives sorted far more often
 than expected — by time, by player, by outcome — and a tail split on sorted data hands you
