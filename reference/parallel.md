@@ -97,6 +97,12 @@ message whose topic is not bound yet, and a seed dropped on the floor fails sile
 `parallel.serve` binds the reserved `__nanoSeed` topic for you; using that name for your own
 handler errors.
 
+Verified end to end by `ParallelSuite`: every worker reports a seed, worker `i` receives
+`base + i`, the same base reproduces every worker's stream across a pool rebuild, and — the
+control that makes the rest mean anything — a different base produces a different stream.
+Without that last check, a pool that ignored seeding entirely and drew one fixed sequence
+forever would pass.
+
 ## Worker side
 
 | Member | Description |
