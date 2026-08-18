@@ -38,10 +38,20 @@ regardless of batch size, versus one per row with a `select` loop.
 | `F.var(t, dim?, unbiased?)` → `Tensor` | Variance, two-pass form. |
 | `F.std(t, dim?, unbiased?)` → `Tensor` | Standard deviation. |
 | `F.norm(t)` → `Tensor` | L2 norm over all elements. |
-| `F.layerNorm(x, gamma?, beta?, eps?)` → `Tensor` | Normalise each row to zero mean and unit variance, then scale and shift. |
+| `F.layerNorm(x, gamma?, beta?, eps?)` → `Tensor` | Normalise each row to zero mean and unit variance, then scale and shift. One fused node, not nine. |
 
 `var` uses the two-pass form deliberately. The `E[x²] - E[x]²` shortcut can return
 negative variance for large means, and the `sqrt` in `std` then gives `nan`.
+
+`layerNorm` is **one fused node, not nine**. The composed chain cost 568 us at `{32,64}`
+forward+backward — nine tenths of a whole batch-32 training step — against 88.2 us fused,
+a 6.4x gain, and 9.1x on the forward alone. It normalises over the last dimension, so a
+`{batch, features}` tensor is normalised per sample.
+
+Its output differs from a hand-composed chain in the **last bit**: it computes
+`1/sqrt(var + eps)` once per row and multiplies, where the composition divides per element.
+That is one ulp, and it is the reason a division count per row dropped from `features` to
+one.
 
 ## Activations
 
