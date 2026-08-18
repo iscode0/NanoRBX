@@ -37,16 +37,15 @@ DataStore:SetAsync("model_v3", text)
 
 -- later
 local loaded = DataStore:GetAsync("model_v3")
-local ok = nano.serialize.fromString(model, loaded)
+local ok, err = pcall(nano.serialize.fromString, model, loaded)
 if not ok then
-    warn("architecture mismatch — model shape changed since save")
+    warn("could not load weights: " .. tostring(err))
 end
 ```
 
-Every format carries an **architecture fingerprint and refuses to load on mismatch**,
-returning `false`. Always check the return value. This is the reason to use `serialize`
-over `model:setFlat`, which will happily load a 64-hidden genome into a 48-hidden network
-and produce a model that runs and outputs confident nonsense.
+Every format carries an **architecture fingerprint and refuses to load on mismatch**. The
+refusal is an error, not a `false` return, so wrap the load in `pcall` — an unhandled
+mismatch takes down whatever script was doing the loading.
 
 For large models, `toBase64` is roughly half the size:
 
