@@ -65,7 +65,7 @@ line helps.
 | Member | Description |
 | --- | --- |
 | `rnn.runSequence(cell, inputs, state?)` → `({Tensor}, State)` | Run a whole sequence and return every output plus the final state. |
-| `rnn.runTruncated(cell, inputs, window, callback, state?)` → `State` | Run `window` steps, invoke `callback(outputs, from, to)` so you can take an optimizer step, then detach and continue. |
+| `rnn.runTruncated(cell, inputs, window, onWindow, state?)` → `State` | Run `window` steps, invoke `onWindow(outputs, from, to)` so you can take an optimizer step, then detach and continue. |
 
 ```lua
 local outputs, finalState = rnn.runSequence(cell, inputs, state)
