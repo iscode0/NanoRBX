@@ -30,7 +30,7 @@ local optim = nano.optim
 | --- | --- |
 | `opt:zeroGrad()` → `()` | Ready every gradient for the next backward pass. Call before every backward. |
 | `opt:hardZeroGrad()` → `()` | Actually zero-fill every gradient buffer. |
-| `opt:step()` → `()` | Apply one update. |
+| `opt:step()` → `()` | Apply one update. Parameters whose gradient is stale — meaning they received nothing from the last backward pass — are skipped. |
 | `opt:clipGradNorm(maxNorm)` → `number` | Clip by global gradient norm. Returns the **pre-clip** norm. |
 | `optim.Optimizer.init(self, parameters, lr)` → `self` | Initialise a custom optimizer. |
 
@@ -39,6 +39,10 @@ local optim = nano.optim
 It marks each gradient buffer stale, and the next accumulation overwrites instead of
 adding — same result, without an O(params) pass on every step. For a 4,866 parameter
 network that is 4,866 writes replaced by 6 flag writes.
+
+A parameter that receives no gradient in a given backward pass keeps its stale flag, and
+`step` skips it. Without that check a branch of the model that went unused for a step would
+have last step's gradient applied to it again — and again every step it stayed unused.
 
 The one visible difference: between `zeroGrad()` and `backward()`, a parameter's `.grad`
 still holds the *previous* step's values rather than zeros. Nothing in Nano reads
