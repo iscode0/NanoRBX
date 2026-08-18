@@ -37,7 +37,7 @@ Uniform-sampling circular buffer for off-policy algorithms.
 | --- | --- |
 | `rl.ReplayBuffer.new(capacity, obsSize, actionSize)` → `ReplayBuffer` | Fixed-capacity circular storage. |
 | `buffer.count: number` | Transitions currently stored. |
-| `buffer:add(obs, action, reward, nextObs, done)` → `()` | Store one transition. |
+| `buffer:add(obs, action, reward, nextObs, terminated)` → `()` | Store one transition. |
 | `buffer:ready(minimum)` → `boolean` | Whether at least `minimum` transitions are stored. |
 | `buffer:sample(batch)` → `table` | Uniform sample. Fields: `.obs`, `.action`, `.nextObs` (Tensors), `.reward`, `.done`, `.obsRows`, `.actionRows` (arrays). |
 
@@ -66,7 +66,7 @@ still getting wrong. Priorities live in a sum tree, so sampling and updating are
 | Member | Description |
 | --- | --- |
 | `rl.PrioritizedReplay.new(capacity, obsSize, actionSize, alpha?, beta?)` → `PrioritizedReplay` | `alpha` defaults to 0.6, `beta` to 0.4. |
-| `per:add(obs, action, reward, nextObs, done)` → `()` | Store one transition at maximum priority. |
+| `per:add(obs, action, reward, nextObs, terminated)` → `()` | Store one transition at maximum priority. |
 | `per:ready(minimum)` → `boolean` | Whether at least `minimum` transitions are stored. |
 | `per:sample(batch)` → `table` | Same fields as `ReplayBuffer:sample`, plus `.indices` and `.weights`. |
 | `per:updatePriorities(indices, errors)` → `()` | Set new priorities from fresh TD errors. |
@@ -119,7 +119,7 @@ a different advantage depending on which minibatch it lands in.
 | `dist:entropy()` → `Tensor` | Differentiable entropy. |
 | `dist:sample()` → `{{number}}` | Plain Lua sample, for rollouts. |
 | `rl.Categorical.new(logits)` → `Categorical` | Distribution over discrete actions. |
-| `categorical:logProb(indices)` → `Tensor` | Log-probability of the given 1-based indices. |
+| `categorical:logProb(actions)` → `Tensor` | Log-probability of the given 1-based indices. |
 | `categorical:entropy()` → `Tensor` | Differentiable entropy. |
 | `categorical:sample()` → `{number}` | One action index per row. |
 | `rl.SquashedNormal.new(mean, logStd)` → `SquashedNormal` | Tanh-squashed Gaussian. The SAC policy. |
