@@ -28,7 +28,7 @@ Fields on a tensor instance.
 | `t.grad: buffer?` | Accumulated gradient, allocated on the first backward pass. |
 | `t._prev: {any}` | The input tensors this one was computed from. |
 | `t._backward: (() -> ())?` | Closure pushing gradient into `_prev`. |
-| `t._isLeaf: boolean` | `true` if you constructed it, `false` if an operation produced it. In-place ops refuse to touch results. |
+| `t._isLeaf: boolean` | `true` if you constructed it, `false` if any operation produced it — including under `noGrad`. In-place ops refuse to touch results. |
 | `t._contig: boolean` | Whether strides are plain row-major. Every fast path checks this. |
 | `t._gradStale: boolean` | Set by `Optimizer:zeroGrad`; the next accumulation overwrites instead of adding. |
 
