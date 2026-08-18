@@ -25,6 +25,17 @@ prior ML — and everything else in these docs builds on it.
 
 ---
 
+## Install
+
+In Studio, insert from the Toolbox, `NanoRBX` or by asset ID `138581366222476`, then move the `Nano`
+ModuleScript into `ReplicatedStorage`. Rojo and Wally support are planned.
+
+```lua
+local nano = require(game:GetService("ReplicatedStorage").Nano)
+```
+
+Full details, including the manual tree, are in [Installation](installation.md).
+
 ## Documentation map
 
 ### Start here
