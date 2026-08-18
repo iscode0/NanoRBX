@@ -1,7 +1,8 @@
 # Getting started
 
 This page builds one working model and explains every line. It assumes you have
-[installed Nano](installation.md). It does not assume you know what a neural network is —
+[installed Nano](installation.md) — Toolbox `NanoRBX` or asset ID `138581366222476`, moved into
+`ReplicatedStorage`. It does not assume you know what a neural network is —
 if you want that explained properly, read [What machine learning actually
 is](concepts/ml-primer.md) first, then come back.
 
