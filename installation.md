@@ -2,7 +2,7 @@
 
 ## From the Toolbox (recommended)
 
-Nano is published as a Roblox model. In Studio, open the Toolbox, search, `NanoRBX`, or by asset ID
+Nano is published as a Roblox model. In Studio, open the Toolbox, search `NanoRBX` or by asset ID
 `138581366222476`, and insert it.
 
 Insertion drops the model wherever your current selection is, so **move the `Nano`
