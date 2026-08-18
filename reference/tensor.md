@@ -55,8 +55,8 @@ Shapes are `{batch, features}`. A single sample is `T.new({{0.3, 0.7}})` — dou
 | `t:dim()` → `number` | Number of dimensions. |
 | `t:item()` → `number` | The single value. Errors unless `numel` is 1. |
 | `t:get(i, j, ...)` → `number` | One element, by index per dimension. |
-| `t:at(i)` → `number` | One element of the flat row-major layout, 1-based. |
-| `t:setAt(i, value)` → `()` | Write one element of the flat layout. |
+| `t:at(i)` → `number` | One element of the flat row-major layout, 1-based. Contiguous tensors only — errors otherwise. |
+| `t:setAt(i, value)` → `()` | Write one element of the flat layout. Contiguous tensors only — errors otherwise. |
 | `t:toFlat()` → `buffer` | Contiguous **buffer** — the internal accessor. Returns the underlying storage directly when already contiguous at offset 0, so it is free in the common case. |
 | `t:toTable()` → `{number}` | Plain **Lua array** — the interop boundary. Always copies. |
 | `t:contiguous()` → `Tensor` | A contiguous copy. Always allocates, even when the tensor is already contiguous. |
@@ -140,10 +140,14 @@ silently wrong, and hard to see. Leave `dim` alone unless you mean it.
 All views are differentiable, and all of them **materialize** — none returns a view into
 the original storage.
 
+`transpose` takes a dedicated 2D path: 15.5 us at `{64,64}` against 153.2 us for the
+general path it replaced, and 81.6 us against 451.0 us including the backward. Three or
+more dimensions still use the general `unravel` walk, which is unchanged.
+
 | Member | Description |
 | --- | --- |
 | `T.matmul(a, b)` · `T.dot(a, b)` → `Tensor` | 2D matrix multiply. Skips zero multiplicands, which pays off on ReLU nets. |
-| `T.transpose(a, dim1?, dim2?)` → `Tensor` | Swap two dimensions, defaulting to the last two. |
+| `T.transpose(a, dim1?, dim2?)` → `Tensor` | Swap two dimensions, defaulting to the last two. 2D takes a dedicated path with no per-element index arithmetic. |
 | `T.reshape(a, shape)` → `Tensor` | Same elements, new shape. |
 | `T.flatten(a)` → `Tensor` | Collapse to one dimension. |
 | `T.unsqueeze(a, dim)` → `Tensor` | Insert a size-1 dimension. |
