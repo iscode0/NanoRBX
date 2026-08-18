@@ -40,6 +40,7 @@ so the scheduler can balance them.
 | `pool:send(workerIndex, topic, ...)` → `()` | Send one message to one worker. |
 | `pool:broadcast(topic, ...)` → `()` | Send the same message to every worker. |
 | `pool:map(topic, jobs, timeout?)` → `{any}` | Dispatch jobs round-robin and yield until every result returns. |
+| `pool:seedWorkers(base)` → `()` | Give each worker its own reproducible stream. Worker `i` receives `base + i`. Called automatically by `Pool.new` when a seed is in force. |
 | `pool:destroy()` → `()` | Tear down the actors and the container. |
 | `parallel.suggestedWorkers()` → `number` | A reasonable worker count for the current context. |
 
@@ -71,6 +72,30 @@ Cloned Scripts do not run their top-level code until Roblox schedules them, so a
 dispatched the instant it is constructed sends every job into a worker that is not
 listening. They vanish, surfacing only as a timeout with nothing to show for it. `Pool.new`
 calls `waitReady` for you.
+
+### Seeding across the actor boundary
+
+Every Actor is a separate Lua VM, so it loads its **own** copy of `Config` with its own
+unseeded `Random`. `nano.seed` on the server cannot reach a worker — which meant a seeded
+run was reproducible everywhere except inside the pool, and evolution and parallel rollouts
+were the two places that mattered most.
+
+`Pool.new` now propagates the seed automatically after `waitReady`, so seeding the server
+before you build the pool is enough:
+
+```lua
+nano.seed(12345)
+local pool = parallel.Pool.new(script.NanoWorker, 8)   -- workers seeded here
+```
+
+Worker `i` gets `base + i`, **not** `base`. Seeding every worker identically would make each
+one draw the same exploration noise and the same environment layout, so a population of 8
+would evaluate 8 copies of the same rollout — reproducible and useless.
+
+The propagation happens after `waitReady` and never before, because an Actor drops any
+message whose topic is not bound yet, and a seed dropped on the floor fails silently.
+`parallel.serve` binds the reserved `__nanoSeed` topic for you; using that name for your own
+handler errors.
 
 ## Worker side
 
