@@ -50,8 +50,6 @@ If your op has a kink — a point where it is not differentiable, like `relu` at
 the test inputs away from it. Central differences are simply wrong *at* a kink, and a
 failure there is measurement noise rather than a bug.
 
-Add your op to `TestGradients.server.lua` so it stays checked. See [Testing](../testing.md).
-
 ## Setting graph fields by hand
 
 `Tensor` keeps `newResult` and `markTracked` local, so an op written in `functional.lua`
@@ -226,7 +224,6 @@ gained 1.06x. See [Performance](../performance.md).
 - [ ] Both `__call` metamethods present on a custom layer
 - [ ] Every learnable tensor appears in `parameters()`
 - [ ] `self.training` respected if behaviour differs at eval
-- [ ] Added to `TestGradients.server.lua`
 - [ ] Nothing requires a module lazily if it will run inside an Actor
 
 That last one is not obvious. `require` is unavailable in a desynchronized parallel phase,
@@ -238,5 +235,4 @@ inside a worker. `nn` used to resolve `functional` on demand, which put a `requi
 
 - [Tensors and autograd](../concepts/autograd.md) — how the graph works
 - [`Tensor` reference](../reference/tensor.md) — `unaryOp`, `binaryOp`, `gradcheck`
-- [Testing](../testing.md) — what the test scripts prove
 - [Performance](../performance.md) — when fusion is worth it
