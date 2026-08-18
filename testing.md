@@ -1,6 +1,7 @@
 # Testing
 
-Five scripts, **341 assertions, all passing**.
+Seven scripts. Five unit suites (**341 assertions**), plus an adversarial edge-case suite
+and a benchmark harness.
 
 | script | assertions | covers |
 | --- | --- | --- |
@@ -9,6 +10,8 @@ Five scripts, **341 assertions, all passing**.
 | `TestAlgorithms` | 23 | Agent contracts, and does-it-actually-learn |
 | `TestAdditions` | 47 | Seeding, Trainer, diagnose, PER, compile |
 | `TestRecurrent` | 16 | RecurrentPPO on a provable memory task |
+| `EdgeSuite` | 169 | Adversarial edge cases: degenerate shapes, aliasing, numeric extremes, contract violations, determinism |
+| `BenchSuite` | 66 cases | Timing and allocation, with checksums that catch a change in behaviour |
 
 All are Scripts in `ServerScriptService`.
 
@@ -23,6 +26,40 @@ backward pass never errors — it trains slightly wrong — so this is the only 
 between you and a week of blaming hyperparameters.
 
 The other three after changes to their respective areas.
+
+## EdgeSuite
+
+169 checks, 0 failures, 7 findings. Goes after what the unit suites assume: 1x1 and empty
+tensors, every unroll remainder width, self-aliased operations (`x + x`, `x * x`,
+`matmul(x, x)`), saturation and kink gradients, and every documented contract that is
+supposed to error.
+
+It reports four verdicts rather than two. `FAIL` is a broken contract. **`FINDING` is
+behaviour with no documented contract that looks suspicious** — a nan, an inf, an error
+where success seemed reasonable. That distinction is the point: FAILs are things already
+known to be wrong, FINDINGs are things nobody has decided about.
+
+The seven standing findings are all correct IEEE arithmetic — `exp(1000)` is `inf`,
+`log(0)` is `-inf`, `sqrt(-1)` is `nan`, a nan propagates through a whole layer. They are
+kept as probes rather than deleted because a change in any of them, from a codegen
+difference or a Luau update, is worth seeing in a diff.
+
+`errorsCleanly` asserts both that a call threw **and** that the message names the problem.
+A guard that fires with "attempt to index a nil value" is barely better than no guard,
+since the caller still has to read the source to find out what they did wrong.
+
+## BenchSuite
+
+66 cases with calibrated rep counts, median/p95/CV, and allocation per operation. Paste the
+emitted `BASELINE` table back into the script to get a diff against the previous run.
+
+Every case also returns a **checksum**, and the diff reports `OUTPUT CHANGED` for any case
+whose checksum moved — which invalidates the timing beside it. A faster benchmark computing
+something different is not an optimisation. Checksums have been verified identical across
+independent runs, so a moved checksum is signal rather than noise.
+
+Read `CV` before any timing: above 10% the harness marks the row `NOISY`, and sub-10us
+cases routinely land there.
 
 ## TestTensor
 
