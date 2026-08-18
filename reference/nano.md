@@ -75,8 +75,9 @@ local nano = require(game:GetService("ReplicatedStorage").Nano)
 | `nano.gaussian()` → `number` | One standard normal from the shared seeded stream. |
 
 `nano.seed` covers tensor initialisation, dropout masks, exploration noise, replay
-sampling, epsilon-greedy and GA mutation. It does **not** cover `Dataset:split`, which
-takes its own `seed` argument, or `data.Loader:iter()`, which uses `math.random`.
+sampling, epsilon-greedy, GA mutation, minibatch order and dataset splits. Passing an
+explicit seed to `Dataset:split` gives that split a private stream instead, so it stays
+identical even if the amount of global randomness drawn beforehand changes.
 
 ## Diagnostics and deployment
 
