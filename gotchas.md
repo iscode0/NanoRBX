@@ -48,6 +48,11 @@ sampling — otherwise the finite difference compares two different networks.
 transform is fused into the loss for stability, and applying it twice flattens your
 gradients.
 
+**IEEE edges do not throw.** `exp(1000)` is `inf`, `log(0)` is `-inf`, `log(-1)` and
+`sqrt(-1)` are `nan`, `x/0` is `inf`. A single `nan` entering a layer comes out of every
+output and keeps going. Use `safeExp` where an exponent can spike, and
+`train.diagnose(model)` to find non-finite parameters after the fact.
+
 **Softmax `dim` defaults to the last dimension.** A softmax normalising over the whole
 tensor makes every row depend on every other — silently wrong, hard to see.
 
