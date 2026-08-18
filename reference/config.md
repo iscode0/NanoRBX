@@ -44,6 +44,10 @@ halve the trig cost but makes the stream stateful in a way that breaks reproduci
 across differently-shaped calls: the same seed would give different numbers depending on
 how many samples were drawn before. Determinism is worth more than the saved cosine.
 
-**Two shuffles are outside this stream.** `Dataset:split(fraction, seed)` builds its own
-`Random`, and `data.Loader:iter()` uses `math.random`. Neither replays from
-`Config.seed` — pass `split` an explicit seed when you need a reproducible partition.
+**Every random source in the library routes through here.** `Dataset:split` and
+`data.Loader:iter()` included — they used to call `Random.new` and `math.random` directly,
+which meant a seeded run reproduced its weights but not the order they were trained on.
+
+`Config.stream(seed)` is the deliberate exception: `Dataset:split(fraction, seed)` uses it
+so a split stays identical even if the amount of global randomness drawn before it
+changes.
