@@ -59,7 +59,7 @@ Shapes are `{batch, features}`. A single sample is `T.new({{0.3, 0.7}})` — dou
 | `t:setAt(i, value)` → `()` | Write one element of the flat layout. |
 | `t:toFlat()` → `buffer` | Contiguous **buffer** — the internal accessor. Returns the underlying storage directly when already contiguous at offset 0, so it is free in the common case. |
 | `t:toTable()` → `{number}` | Plain **Lua array** — the interop boundary. Always copies. |
-| `t:contiguous()` → `Tensor` | A contiguous copy, or `self` if already contiguous. |
+| `t:contiguous()` → `Tensor` | A contiguous copy. Always allocates, even when the tensor is already contiguous. |
 | `t:isContiguous()` → `boolean` | Whether strides are plain row-major. |
 | `tostring(t)` → `string` | Formatted shape and values. |
 
@@ -168,4 +168,4 @@ the graph.
 | `T.mulInPlace(a, value)` → `Tensor` | Multiply in place. |
 | `T.fillInPlace(a, value)` → `Tensor` | Fill with a constant. |
 | `T.clampInPlace(a, lo, hi)` → `Tensor` | Clamp in place. |
-| `T.copyFrom(a, other)` → `Tensor` | Copy another tensor's values in. |
+| `T.copyFrom(a, other)` → `Tensor` | Copy another tensor's values in. Errors if the element counts differ. |
