@@ -94,7 +94,7 @@ completely healthy and never completes a single job.
 
 ```lua
 local nano = require(game:GetService("ReplicatedStorage").Nano)
-print(nano.VERSION)                          --> 3.3.0
+print(nano.VERSION)                          --> 3.4.0
 
 local t = nano.tensor({{1, 2}, {3, 4}})
 print(t:numel(), t:dim())                    --> 4  2
