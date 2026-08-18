@@ -93,6 +93,24 @@ Every module, every public function and field, each with an immediate descriptio
 
 ---
 
+## Installing
+
+Toolbox: search `NanoRBX` or asset ID `138581366222476`, then move the `Nano` ModuleScript
+into `ReplicatedStorage`.
+
+Wally:
+
+```toml
+[dependencies]
+Nano = "iscode0/nano@3.4.0"
+```
+
+Rojo, from source: point a `$path` at `src`, or `rojo build -o Nano.rbxmx` to produce the
+model. Full details, including the one edit `parallel` users need to make under Wally, are
+in [Installation](installation.md).
+
+---
+
 ## The shape of every program
 
 Nano has one core loop. Supervised learning, reinforcement learning, and everything else are
