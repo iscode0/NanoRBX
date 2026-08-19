@@ -964,4 +964,274 @@ end
 table.sort(installed)
 F._installed = installed
 
+--[[
+	F.attention — fused scaled dot-product attention.
+
+	Composed out of existing ops this is matmul, div, mask-add, softmax,
+	matmul: five graph nodes, two of which materialise a {T,S} score matrix
+	and its gradient. Fused, it is one node that keeps only P from the
+	forward, which is the one thing the backward genuinely needs.
+
+	The backward is the closed form, verified against central finite
+	differences before this file was written:
+
+		dP      = dO Vt
+		dV      = Pt dO
+		dscores = P * (dP - rowsum(dP * P))     softmax Jacobian, row-local
+		dQ      = dscores K  / sqrt(D)
+		dK      = dscores_t Q / sqrt(D)
+
+	The row-local form is what makes this affordable: the softmax Jacobian
+	is diag(p) - p pt, which would be an S-by-S matrix per row, but every
+	product needed collapses to one dot product per row.
+
+	WHY THE MASK IS NOT REAPPLIED IN THE BACKWARD. A masked score is -inf,
+	so its P is exactly 0, so dscores is exactly 0 there — 0 * anything,
+	not a small number that happens to round. Verified as an exact equality,
+	not a tolerance, because a leak here would be a silent information leak
+	from future tokens: the model would train fine and cheat at evaluation.
+
+	WHY EVERY INNER LOOP IS UNROLLED 4x. The first version wrote plain
+	scalar loops and measured 1.79x SLOWER than the composition it was meant
+	to replace, because Tensor.matmul is 4x-unrolled with a zero-skip and
+	this was not. Under --!native the loop overhead an unroll removes is a
+	large fraction of a tight numeric body, so a hand-rolled kernel that
+	skips the unroll loses to a general op that does not. Same failure mode
+	as nn.compile before its rewrite.
+
+	The unrolls here deliberately keep ONE accumulator chain rather than the
+	four independent partials the backward of F.linear uses. Four partials
+	would reassociate the sum and move the last bit, which would break the
+	fused-vs-composed equivalence check for no measured gain. Unrolling for
+	fewer loop tests, not for instruction-level parallelism.
+]]
+
+--- Scaled dot-product attention over one head.
+--- Q is {T,D}, K and V are {S,D}. Returns {T,D}.
+--- When causal, query t attends to keys 1..t+(S-T), so a single-query decode
+--- step against an S-long cache sees the whole cache.
+function F.attention(Q: Tensor, K: Tensor, V: Tensor, causal: boolean?): Tensor
+	local qs, ks, vs = Q.shape, K.shape, V.shape
+	if #qs ~= 2 or #ks ~= 2 or #vs ~= 2 then
+		error("attention: Q, K and V must all be 2D", 2)
+	end
+	local T, D = qs[1], qs[2]
+	local S = ks[1]
+	if ks[2] ~= D then
+		error(("attention: K has head dim %d, Q has %d"):format(ks[2], D), 2)
+	end
+	if vs[1] ~= S then
+		error(("attention: V has %d rows, K has %d"):format(vs[1], S), 2)
+	end
+	if D == 0 then
+		error("attention: head dimension is zero", 2)
+	end
+	if S == 0 then
+		error("attention: no keys to attend to", 2)
+	end
+	local DV = vs[2]
+	local isCausal = causal == true
+	-- right-aligned so a T=1 decode step against an S-long cache sees all of it
+	local offset = S - T
+	if isCausal and offset < 0 then
+		error(("attention: causal needs S >= T, got S=%d T=%d"):format(S, T), 2)
+	end
+
+	local qd, qo = flatOf(Q)
+	local kd, ko = flatOf(K)
+	local vd, vo = flatOf(V)
+
+	local scale = 1 / m_sqrt(D)
+	local P = alloc(T * S)
+	local out = alloc(T * DV)
+
+	local dTail = D - 3
+	local vTail = DV - 3
+
+	for i = 0, T - 1 do
+		local qBase = (qo + i * D) * 8
+		local pRow = i * S * 8
+		-- causal: keys after this query are not merely small, they are absent
+		local limit = if isCausal then i + offset else S - 1
+
+		-- scores, tracking the row max in the same pass
+		local best = -math.huge
+		for j = 0, limit do
+			local a, b = qBase, (ko + j * D) * 8
+			local dot = 0
+			local c = 0
+			while c < dTail do
+				dot += b_read(qd, a) * b_read(kd, b)
+				dot += b_read(qd, a + 8) * b_read(kd, b + 8)
+				dot += b_read(qd, a + 16) * b_read(kd, b + 16)
+				dot += b_read(qd, a + 24) * b_read(kd, b + 24)
+				a += 32; b += 32; c += 4
+			end
+			while c < D do
+				dot += b_read(qd, a) * b_read(kd, b)
+				a += 8; b += 8; c += 1
+			end
+			dot *= scale
+			b_write(P, pRow + j * 8, dot)
+			if dot > best then best = dot end
+		end
+
+		-- subtract the max before exp: scores scale with D, and exp of a few
+		-- hundred is inf, which turns the whole row into nan
+		local sum = 0
+		for j = 0, limit do
+			local p = pRow + j * 8
+			local e = m_exp(b_read(P, p) - best)
+			b_write(P, p, e)
+			sum += e
+		end
+
+		local inv = 1 / sum
+		for j = 0, limit do
+			local p = pRow + j * 8
+			b_write(P, p, b_read(P, p) * inv)
+		end
+		-- masked slots stay at the zero the allocation gave them
+
+		-- O = P V. Unrolling across DV touches independent outputs, so it
+		-- cannot reassociate anything.
+		local oBase = i * DV * 8
+		for j = 0, limit do
+			local w = b_read(P, pRow + j * 8)
+			-- a saturated softmax row is mostly zeros; skip those columns
+			if w ~= 0 then
+				local o, v = oBase, (vo + j * DV) * 8
+				local c = 0
+				while c < vTail do
+					b_write(out, o, b_read(out, o) + w * b_read(vd, v))
+					b_write(out, o + 8, b_read(out, o + 8) + w * b_read(vd, v + 8))
+					b_write(out, o + 16, b_read(out, o + 16) + w * b_read(vd, v + 16))
+					b_write(out, o + 24, b_read(out, o + 24) + w * b_read(vd, v + 24))
+					o += 32; v += 32; c += 4
+				end
+				while c < DV do
+					b_write(out, o, b_read(out, o) + w * b_read(vd, v))
+					o += 8; v += 8; c += 1
+				end
+			end
+		end
+	end
+
+	local res = result(out, { T, DV })
+
+	local needsQ = tracking(Q)
+	local needsK = tracking(K)
+	local needsV = tracking(V)
+
+	if needsQ or needsK or needsV then
+		track(res, { Q, K, V })
+
+		res._backward = function()
+			local g = res.grad :: buffer
+
+			local gq = if needsQ then alloc(T * D) else nil
+			local gk = if needsK then alloc(S * D) else nil
+			local gv = if needsV then alloc(S * DV) else nil
+
+			-- one scratch row, reused across queries rather than reallocated
+			local dP = alloc(S)
+
+			for i = 0, T - 1 do
+				local pRow = i * S * 8
+				local oBase = i * DV * 8
+				local limit = if isCausal then i + offset else S - 1
+
+				-- dP = dO Vt, and the row sum of dP * P, in one pass
+				local rowDot = 0
+				for j = 0, limit do
+					local w = b_read(P, pRow + j * 8)
+					local vBase = (vo + j * DV) * 8
+
+					local acc = 0
+					local o, v = oBase, vBase
+					local c = 0
+					while c < vTail do
+						acc += b_read(g, o) * b_read(vd, v)
+						acc += b_read(g, o + 8) * b_read(vd, v + 8)
+						acc += b_read(g, o + 16) * b_read(vd, v + 16)
+						acc += b_read(g, o + 24) * b_read(vd, v + 24)
+						o += 32; v += 32; c += 4
+					end
+					while c < DV do
+						acc += b_read(g, o) * b_read(vd, v)
+						o += 8; v += 8; c += 1
+					end
+					b_write(dP, j * 8, acc)
+					rowDot += acc * w
+
+					-- dV = Pt dO accumulates down the queries
+					if gv and w ~= 0 then
+						local q, o2 = j * DV * 8, oBase
+						local d = 0
+						while d < vTail do
+							b_write(gv, q, b_read(gv, q) + w * b_read(g, o2))
+							b_write(gv, q + 8, b_read(gv, q + 8) + w * b_read(g, o2 + 8))
+							b_write(gv, q + 16, b_read(gv, q + 16) + w * b_read(g, o2 + 16))
+							b_write(gv, q + 24, b_read(gv, q + 24) + w * b_read(g, o2 + 24))
+							q += 32; o2 += 32; d += 4
+						end
+						while d < DV do
+							b_write(gv, q, b_read(gv, q) + w * b_read(g, o2))
+							q += 8; o2 += 8; d += 1
+						end
+					end
+				end
+
+				-- dscores, then straight into dQ and dK without materialising it
+				local qBase = (qo + i * D) * 8
+				local gqBase = i * D * 8
+				for j = 0, limit do
+					local w = b_read(P, pRow + j * 8)
+					local ds = w * (b_read(dP, j * 8) - rowDot)
+					-- masked and saturated positions contribute nothing
+					if ds ~= 0 then
+						local s = ds * scale
+						if gq then
+							local a, b = gqBase, (ko + j * D) * 8
+							local c = 0
+							while c < dTail do
+								b_write(gq, a, b_read(gq, a) + s * b_read(kd, b))
+								b_write(gq, a + 8, b_read(gq, a + 8) + s * b_read(kd, b + 8))
+								b_write(gq, a + 16, b_read(gq, a + 16) + s * b_read(kd, b + 16))
+								b_write(gq, a + 24, b_read(gq, a + 24) + s * b_read(kd, b + 24))
+								a += 32; b += 32; c += 4
+							end
+							while c < D do
+								b_write(gq, a, b_read(gq, a) + s * b_read(kd, b))
+								a += 8; b += 8; c += 1
+							end
+						end
+						if gk then
+							local c2, d2 = j * D * 8, qBase
+							local c = 0
+							while c < dTail do
+								b_write(gk, c2, b_read(gk, c2) + s * b_read(qd, d2))
+								b_write(gk, c2 + 8, b_read(gk, c2 + 8) + s * b_read(qd, d2 + 8))
+								b_write(gk, c2 + 16, b_read(gk, c2 + 16) + s * b_read(qd, d2 + 16))
+								b_write(gk, c2 + 24, b_read(gk, c2 + 24) + s * b_read(qd, d2 + 24))
+								c2 += 32; d2 += 32; c += 4
+							end
+							while c < D do
+								b_write(gk, c2, b_read(gk, c2) + s * b_read(qd, d2))
+								c2 += 8; d2 += 8; c += 1
+							end
+						end
+					end
+				end
+			end
+
+			if gq then accumulate(Q, gq) end
+			if gk then accumulate(K, gk) end
+			if gv then accumulate(V, gv) end
+		end
+	end
+
+	return res
+end
+
 return F
