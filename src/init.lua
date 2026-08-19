@@ -176,15 +176,8 @@ function nano.save(model, metadata) return serialize.toTable(model, metadata) en
 function nano.load(model, state) return serialize.fromTable(model, state) end
 
 --[[
-	3.4.0 — cleanup and optimisation pass.
-
-	Bumped because the Toolbox model is the primary install path and VERSION is
-	the only way a user can tell a pre-cleanup copy from this one. The
-	differences are not cosmetic: optimizer serialization crashed outright,
-	toString silently truncated every weight to float32, worker Actors drew
-	from an unseeded RNG, and four optimizers applied stale gradients to
-	parameters that received none.
+	4.0.0 — Release
 ]]
-nano.VERSION = "3.4.0"
+nano.VERSION = "4.0.0"
 
 return nano
