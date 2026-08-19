@@ -274,6 +274,72 @@ function serialize.fromBase64(model: any, payload: { shapes: {{number}}, data: s
 	return true
 end
 
+--[[
+	QUANTIZED TRANSPORT.
+
+	Weights ship as text inside a ModuleScript, and f32 base64 costs 5.33
+	bytes per parameter. A 600k-parameter model is 3.3 MB of source, which
+	is already near what Roblox will comfortably hold.
+
+	int8 with per-row scales costs 1.33 bytes per parameter — 4x smaller,
+	so 4x the model fits in the same script.
+
+	THIS IS TRANSPORT ONLY. Values are dequantized into the same f64
+	buffers fromBase64 fills, so inference afterwards is bit-for-bit the
+	normal path: same speed, same arithmetic, no quantized kernels. The
+	only cost is a one-time rounding at export.
+
+	WHY PER-ROW SCALES RATHER THAN ONE PER TENSOR. A single outlier row
+	sets the scale for every other row, and the rest of the matrix then
+	quantizes into a handful of levels. Per-row keeps each row's full
+	range: w ~= scale * q, with scale = max|row| / 127 for that row.
+]]
+
+--- Load int8 weights produced by the PyTorch exporter.
+--- `payload.scales` holds one f32 per row, flattened in parameter order;
+--- `payload.data` is base64 int8, one byte per weight.
+function serialize.fromQuantized(model: any, payload: {
+	shapes: {{number}},
+	scales: string,
+	data: string,
+	}): boolean
+	local params = model:parameters()
+	local mismatch = fingerprintMismatch(payload.shapes, params)
+	if mismatch then
+		error("serialize: architecture mismatch — " .. mismatch, 2)
+	end
+
+	local q = decodeBase64(payload.data)
+	local s = decodeBase64(payload.scales)
+
+	local qOffset = 0
+	local sOffset = 0
+
+	for i, p in ipairs(params) do
+		local shape = payload.shapes[i]
+		local n = p:numel()
+		-- rows are the leading dimension; a 1D tensor is one row
+		local rows = if #shape > 1 then shape[1] else 1
+		local cols = n // rows
+
+		local d = p.data
+		local o = p.offset * 8
+
+		for _ = 1, rows do
+			local scale = buffer.readf32(s, sOffset)
+			sOffset += 4
+			for _ = 1, cols do
+				-- readi8, not readu8: the quantized values are signed
+				buffer.writef64(d, o, buffer.readi8(q, qOffset) * scale)
+				qOffset += 1
+				o += 8
+			end
+		end
+	end
+
+	return true
+end
+
 --- Save optimizer moment estimates alongside weights. Resuming without them
 --- leaves the first updates effectively unscaled, which can knock a
 --- converged model out of its minimum on its own reload.
