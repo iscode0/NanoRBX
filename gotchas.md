@@ -108,6 +108,65 @@ the target but left the agent's position visible — so a memoryless policy enco
 target into its own position on step 1 and read it back forever after, using the world as
 memory.
 
+## Transformers
+
+**A transformer without positional encoding is a bag of tokens.** Attention weights depend
+only on the content of Q and K, so shuffling the input rows shuffles the output rows and
+changes nothing else. The model cannot tell `cat sat mat` from `mat sat cat`. It trains, the
+loss falls, and it has learned something strictly weaker than you think. A causal mask does
+not substitute — it restricts which positions are visible, not their order.
+
+**`positions:forward(x, offset)` needs the offset during generation.** Omit it and every
+generated token is encoded as position 1, so the model sees a constant where the order
+signal should be. Pass the number of tokens generated so far.
+
+**`SinusoidalPositions(dim, maxLen)` and `LearnedPositions(maxLen, dim)` take their
+arguments in opposite orders.** Both are two numbers, so a swap constructs fine and errors
+later, at the first `forward`, about a feature width you never typed.
+
+**Attention takes `{T, dim}`, with no batch dimension** — unlike every other layer in `nn`.
+Loop over sequences.
+
+**One KV cache belongs to one sequence.** Two NPCs sharing a cache interleave their
+contexts, which reads as each finishing the other's sentence. `resetCache` between
+sequences; a cache carries the previous generation's context.
+
+**`decode` errors if the graph is on, and that is the feature.** The cache is overwritten in
+place, so a graph built across decode steps would differentiate against values that no
+longer exist. Wrap generation in `nano.noGrad`.
+
+**`compileDecode` covers attention only, not a whole block.** It holds its own cache
+internally and takes no cache argument, so mixing it with `block:newCache` gives you two
+independent caches that disagree about how many positions exist.
+
+**Embedding ids are 1-based.** Nano indexes from 1; most tooling outside it indexes from 0.
+An off-by-one reads the wrong row for every token — no error, and output fluent enough to
+look like a training problem rather than an indexing one.
+
+**`dim` must divide evenly by `heads`.** This one *is* checked, and deliberately: silently
+flooring the head dimension changes the model you think you built, and `1/sqrt(D)` with the
+wrong `D` is a scale error no gradcheck would notice.
+
+## Loading external weights
+
+**`parameters()` is alphabetical, not registration order.** `Linear` yields `bias` then
+`weight`; `LayerNorm` yields `beta` then `gamma`; `MultiheadAttention` yields `out` before
+`qkv`. Anything packing weights from outside must reproduce that order. Shapes are
+fingerprinted, so a wrong architecture errors — but a bias and a beta of the same width are
+the same shape, and a swapped pair loads clean.
+
+**Nano's `Linear` stores `{in, out}`, PyTorch stores `{out, in}`.** Every weight needs
+transposing on the way in. A square layer makes this silent.
+
+**`F.gelu` is the tanh approximation.** PyTorch's default is the exact erf form. The
+difference is small at every activation and compounds through a stack, and it looks exactly
+like an undertrained model.
+
+**Quantized loading is lossy at export, not at inference.** `fromQuantized` dequantizes into
+the same f64 buffers as every other loader, so nothing downstream is approximate. If output
+degraded after quantizing, the rounding happened in the exporter — check the worst-error
+figure it printed.
+
 ## Parallel
 
 **`require()` is unavailable in a parallel phase.** Require in serial, at the worker's top
