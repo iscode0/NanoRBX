@@ -79,8 +79,9 @@ local function forward(ids: {number}): Tensor
 end
 ```
 
-`ids` are **1-based** — `nn.Embedding` indexes from 1, not 0. A vocabulary built with
-0-based ids reads the wrong row for every character, and nothing errors.
+`ids` are **1-based** — `nn.Embedding` indexes from 1, not 0. It range-checks against
+`1..count`, so an id of `0` errors — but only if that token actually turns up. Every other
+0-based id is simply shifted by one and reads a neighbouring row, silently.
 
 ---
 
@@ -227,7 +228,8 @@ end
 ```
 
 Caches are buffers of `maxLen * dim * 8` bytes per block, twice over for K and V. At
-`dim = 128` and `maxLen = 256` that is 512 KB per NPC across three blocks — real memory.
+`dim = 128` and `maxLen = 256` that is 512 KB per block — **1.5 MB per NPC** across three
+blocks. Real memory, and it scales linearly with concurrent speakers.
 Size `maxLen` to the longest reply you actually want, and `resetCache` between replies
 rather than allocating fresh ones.
 
