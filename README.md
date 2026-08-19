@@ -18,6 +18,7 @@ Nano trains and runs neural networks inside Roblox. In practice that means one o
 | Teach an NPC to do something by trial and error | Reinforcement learning | [RL primer](concepts/rl-primer.md) |
 | Run a trained brain on 100 NPCs at 60 fps | Compiled inference | [Deployment](guides/deployment.md) |
 | Evolve behaviour across a population | Parallel evolution | [parallel](reference/parallel.md) |
+| Generate text from an NPC | Transformers | [Transformers](guides/transformers.md) |
 
 If you have never done any of this before, read [What machine learning actually
 is](concepts/ml-primer.md) first. It assumes no background — no calculus, no statistics, no
@@ -65,14 +66,14 @@ Every module, every public function and field, each with an immediate descriptio
 | [Config](reference/config.md) | Global gradient switch, seeding, the shared RNG |
 | [Tensor](reference/tensor.md) | The core: storage, arithmetic, reductions, autograd |
 | [functional](reference/functional.md) | Extra tensor ops, activations, fused kernels, init |
-| [nn](reference/nn.md) | Layers, containers, losses, compiled inference |
+| [nn](reference/nn.md) | Layers, containers, transformers, losses, compiled inference |
 | [optim](reference/optim.md) | SGD, Adam, AdamW, RMSprop, clipping, LR schedules |
 | [rnn](reference/rnn.md) | RNN / LSTM / GRU cells, state helpers, sequence runners |
 | [data](reference/data.md) | Datasets, batching, scaling, metrics, early stopping |
 | [rl](reference/rl.md) | Buffers, GAE, distributions, normalizers, target networks |
 | [algorithms](reference/algorithms.md) | PPO, SAC, DQN, RecurrentPPO — assembled and correct |
 | [train](reference/train.md) | Environment protocol, Trainer, diagnostics |
-| [serialize](reference/serialize.md) | Saving and loading weights and optimizer state |
+| [serialize](reference/serialize.md) | Saving and loading weights, quantized transport, optimizer state |
 | [parallel](reference/parallel.md) | Actor worker pools, weight transport, evolution |
 
 ### Guides
@@ -82,6 +83,8 @@ Every module, every public function and field, each with an immediate descriptio
 | [Supervised learning walkthrough](guides/supervised.md) | A real classifier, from raw data to evaluated model |
 | [Training an NPC with RL](guides/rl-agent.md) | Environment, agent, Trainer, and what the numbers mean |
 | [Deploying a trained model](guides/deployment.md) | Saving, loading, `nn.compile`, running many NPCs |
+| [Transformers](guides/transformers.md) | Attention, positional encoding, KV-cached generation |
+| [Training externally](guides/training-externally.md) | Train on a GPU in PyTorch, ship the weights into Roblox |
 | [Extending Nano](guides/extending.md) | Custom ops and custom layers, gradchecked |
 
 ### Reference material
