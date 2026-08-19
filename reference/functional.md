@@ -77,6 +77,7 @@ grows linearly.
 | Member | Description |
 | --- | --- |
 | `F.linear(x, w, bias?)` → `Tensor` | `y = x @ W + b` in one graph node. Unrolls its three inner loops 4x and skips zero multiplicands. |
+| `F.attention(Q, K, V, causal?)` → `Tensor` | Scaled dot-product attention over one head, forward and backward in one node. |
 | `F.mseLoss(prediction, target, reduction?)` → `Tensor` | Mean squared error. `reduction` is `"mean"` (default) or `"sum"`. |
 | `F.huber(prediction, target, delta?)` → `Tensor` | Huber loss, quadratic within `delta` and linear beyond it. |
 
@@ -87,6 +88,53 @@ faster forward+backward.
 
 Skipping zero multiplicands in `F.linear` is worth ~2x on a post-ReLU layer and costs
 ~1/m when it never fires.
+
+### F.attention
+
+`Q` is `{T, D}`, `K` and `V` are `{S, D}`, and the result is `{T, D}`. One head — 
+[`nn.MultiheadAttention`](nn.md#transformer) slices a fused projection and calls this once
+per head.
+
+Composed out of existing ops this is matmul, div, mask-add, softmax, matmul: five graph
+nodes, two of which materialise a `{T, S}` score matrix *and* its gradient. Fused, it is one
+node that keeps only `P` from the forward, which is the one thing the backward genuinely
+needs.
+
+The backward is the closed form, verified against central finite differences:
+
+```
+dP      = dO Vᵀ
+dV      = Pᵀ dO
+dscores = P * (dP - rowsum(dP * P))     softmax Jacobian, row-local
+dQ      = dscores K  / sqrt(D)
+dK      = dscoresᵀ Q / sqrt(D)
+```
+
+The row-local form is what makes it affordable. The softmax Jacobian is `diag(p) - p pᵀ`,
+an `S`-by-`S` matrix per row, but every product needed collapses to one dot product per row.
+
+**`causal` is right-aligned.** Query `t` attends to keys `1 .. t + (S - T)`, so a
+single-query decode step against an `S`-long cache sees the whole cache — which is what
+makes it usable both for a full `{T, dim}` forward and for one-token decode. Causal requires
+`S >= T`.
+
+The mask is not reapplied in the backward, and that is deliberate rather than an oversight.
+A masked score is `-inf`, so its `P` is exactly `0`, so `dscores` is exactly `0` there — `0`
+times anything, not a small number that happens to round. It is verified as an exact
+equality rather than a tolerance, because a leak here would be a silent information leak
+from future tokens: the model would train fine and cheat at evaluation.
+
+Scores are shifted by the row max before `exp`. Scores scale with `D`, and `exp` of a few
+hundred is `inf`, which turns the whole row into `nan`.
+
+Every inner loop is unrolled 4x. The first version wrote plain scalar loops and measured
+**1.79x slower** than the composition it was meant to replace, because `Tensor.matmul` is
+4x-unrolled with a zero-skip and this was not. Under `--!native` the loop overhead an unroll
+removes is a large fraction of a tight numeric body, so a hand-rolled kernel that skips the
+unroll loses to a general op that does not — the same failure mode as `nn.compile` before
+its rewrite. The unrolls keep **one** accumulator chain rather than the four independent
+partials `F.linear`'s backward uses: four would reassociate the sum and move the last bit,
+breaking the fused-vs-composed equivalence check for no measured gain.
 
 ## Linear algebra
 
