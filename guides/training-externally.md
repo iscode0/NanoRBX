@@ -143,9 +143,12 @@ activation, which is invisible in any single value and compounds through a stack
 
 ### Token ids are 1-based
 
-`nn.Embedding` indexes from 1. Python vocabularies index from 0. Feed a 0-based id straight
-in and every character reads the wrong row — shapes all match, nothing errors, and the model
-emits fluent nonsense.
+`nn.Embedding` indexes from 1. Python vocabularies index from 0. `Embedding` range-checks
+against `1..count`, so an id of `0` does error — but that only fires when the zeroth token
+actually appears, and every other id is quietly shifted by one and reads a neighbouring row.
+So the failure is loud on one token and silent on the rest, which is the worst of both: you
+get an error that looks like a stray character, fix the character, and ship a model that
+reads the wrong embedding for everything.
 
 `W.chars` is written in Nano's 1-based order and `W.encode` / `W.decode` are the only
 correct way to cross that boundary. Use them rather than indexing a vocabulary yourself.
