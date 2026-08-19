@@ -4,7 +4,7 @@ A self-contained machine learning library for Roblox Luau. Neural networks, auto
 differentiation, and reinforcement learning, with no external dependencies and no HTTP calls.
 Everything runs inside your experience.
 
-**Version 3.4.0**
+**Version 3.5.0**
 
 ---
 
