@@ -61,8 +61,10 @@ Per-change, measured in isolation:
 | change | gain |
 | --- | --- |
 | `transpose` {64,64} forward (2D path) | **9.9x** |
+| KV-cached generation, 64 tokens (attention layer) | **59x** |
 | Fused LayerNorm, forward | **9.1x** |
 | Fused LayerNorm, fwd+bwd | **6.4x** |
+| Fused QKV projection vs three Linears | **~1.6x** of a forward |
 | `transpose` {64,64} fwd+bwd | **5.5x** |
 | `nn.compile` rewrite (batch-1, hidden 64) | **2.45x** |
 | Huber loss fwd+bwd (fused) | **5.8x** |
@@ -130,6 +132,77 @@ chain in the last bit: it computes `1/sqrt(var + eps)` once per row and multipli
 the composition divides per element. Multiply-by-reciprocal and divide disagree on about
 27% of inputs by 1 ulp. That is a real numerical difference and the right call is to accept
 it — the two paths agree to 1e-9 and the division count per row dropped from H to 1.
+
+## Attention, and the unroll that was not optional
+
+Composed from existing ops, scaled dot-product attention is five graph nodes — matmul, div,
+mask-add, softmax, matmul — two of which materialise a `{T, S}` score matrix *and* its
+gradient. `F.attention` is one node that keeps only `P` from the forward, which is the only
+thing the backward needs.
+
+The first version of it measured **1.79x slower** than the composition it replaced.
+
+The cause was not the algorithm. `Tensor.matmul` unrolls its inner loop 4x and skips zero
+multiplicands; the hand-written kernel did neither, so a purpose-built fused op ran a naive
+loop while the general path ran the tuned one. Under `--!native` the loop overhead an unroll
+removes is a large fraction of a tight numeric body. Porting the unroll is what made fusion
+a win at all.
+
+This is the same failure as the `nn.compile` rewrite, and the lesson is the same one: a fast
+path nobody benchmarks against the slow path is an assumption, not an optimisation.
+
+One detail is deliberately left on the table. The unrolls keep a **single** accumulator
+chain rather than the four independent partials `F.linear`'s backward uses. Four partials
+would reassociate the sum and move the last bit, which breaks the fused-versus-composed
+equivalence check for no measured gain. The unroll here buys fewer loop tests, not
+instruction-level parallelism.
+
+## Generation is cubic without a cache
+
+Attention is O(T²) in context length, so generating T tokens by re-running the forward over
+the whole prefix each time is O(T³) overall. Measured on the attention layer:
+
+| tokens | no cache |
+| --- | --- |
+| 8 | 2.9 ms |
+| 16 | 11.0 ms |
+| 32 | 43.7 ms |
+
+4x per doubling. Exactly cubic, and the practical symptom is a reply that visibly slows as
+it goes — the last character costs hundreds of times the first.
+
+A KV cache stores keys and values per position, so a step projects only the new token and
+attends over the stored prefix: O(T) per token, O(T²) overall.
+
+| | 64 tokens |
+| --- | --- |
+| Full forward per token | 182 ms |
+| `TransformerBlock:decode` | **3.1 ms** |
+
+The cached path is verified **bit-identical** to the full forward, not merely close.
+
+The cache is a plain buffer of `maxLen` rows written in place, and a prefix view is
+`Tensor.new(buffer, {len, dim})` — the same storage with a smaller shape, no copy, because
+rows are contiguous and the prefix starts at zero.
+
+## compileDecode, and the 39%
+
+One cached token at `dim = 64` is 20,480 multiply-adds. At the library's 1.26 ns/MAC that
+should take 25.9 us. `decode` measured **42.7 us**.
+
+The missing 16.8 us — 39% — is per-call cost on a call doing very little arithmetic: graph
+checks, a Tensor per intermediate, four narrows that each allocate and copy, and an `F.cat`
+to rejoin the heads. Exactly the shape of problem `nn.compile` was built for, and the same
+fix: hoist everything fixed at compile time, work in raw buffers, allocate the scratch once.
+
+`compileDecode` keeps no Tensors, builds no graph, and does no narrow or cat. The head slices
+are offsets into one qkv buffer, and each head's output is written straight into its slice of
+the concat scratch — because concatenating along the feature axis *is* writing at an offset.
+
+The pattern holds across every optimisation on this page: **fusion pays where node count
+dominates arithmetic.** A one-token decode is almost pure overhead, so removing overhead is
+almost the whole win. A 64-token forward is mostly arithmetic, and the same change would
+barely register.
 
 ## Transposing without index arithmetic
 
