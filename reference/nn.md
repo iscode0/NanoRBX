@@ -1,6 +1,6 @@
 # nn
 
-Layers, containers, losses and compiled inference.
+Layers, containers, transformers, losses and compiled inference.
 
 ```lua
 local nn = nano.nn
@@ -18,7 +18,7 @@ The base class every layer inherits. Exposed for building custom layers; see
 | Member | Description |
 | --- | --- |
 | `m:forward(x)` · `m(x)` → `Tensor` | Run the layer. |
-| `m:parameters()` → `{Tensor}` | Flat list, depth-first, stable order. **Cached** — copy with `table.clone` before mutating. |
+| `m:parameters()` → `{Tensor}` | Flat list, depth-first, **alphabetical by registered name** at each level. **Cached** — copy with `table.clone` before mutating. See [Parameter order](#parameter-order). |
 | `m:zeroGrad()` → `()` | Zero every parameter's gradient. |
 | `m:numParameters()` → `number` | Total scalar parameter count. |
 | `m:train()` → `()` | Set `training = true` across the whole tree. |
@@ -34,6 +34,30 @@ The base class every layer inherits. Exposed for building custom layers; see
 
 The cache is why `table.insert(model:parameters(), extra)` is a bug: it mutates the cached
 list, so every later call returns the polluted one.
+
+### Parameter order
+
+`parameters()` sorts each module's own parameter names, then sorts its submodule names, and
+recurses. It is **alphabetical, not registration order**. That is invisible until you need
+to line the list up against something outside Nano — an external exporter, a genome layout,
+a hand-packed buffer — at which point it is the whole game:
+
+| module | yields, in this order |
+| --- | --- |
+| `Linear` | `bias`, `weight` |
+| `LayerNorm` | `beta`, `gamma` |
+| `MultiheadAttention` | `out.bias`, `out.weight`, `qkv.weight` |
+| `TransformerBlock` | `attn.*`, `fc1.*`, `fc2.*`, `norm1.*`, `norm2.*` |
+
+Every one of those is the reverse of, or unrelated to, the order the constructor registers
+them in. `Sequential` registers its children as `"001"`, `"002"`, … precisely so the
+alphabetical sort reproduces the layer order — up to 999 layers.
+
+The failure mode is not a crash. A `Linear` bias and a `LayerNorm` beta of the same width
+are the same shape, so a swapped pair loads cleanly and the model is wrong forever. This is
+why [`serialize`](serialize.md) fingerprints shapes, and why anything writing weights from
+outside must reproduce this order exactly — see
+[Training externally](../guides/training-externally.md).
 
 `getFlat`/`setFlat` do **not** check architecture. Loading a 64-hidden genome into a
 48-hidden network produces a model that runs and outputs confident nonsense — use
@@ -67,6 +91,186 @@ opinionated — small change, large effect on early PPO.
 batch, so a network behaves differently at batch 1 than at 32 — fatal for RL, where you
 act on one observation and train on many. LayerNorm's statistics come from within the
 sample.
+
+## Positional encoding
+
+Attention is a weighted sum over positions, and the weights depend only on the *content* of
+Q and K. Shuffle the rows of the input and every output row is the same row, shuffled — the
+layer cannot tell `cat sat mat` from `mat sat cat`. A causal mask restricts *which*
+positions are visible; it says nothing about their order among the visible ones.
+
+So a transformer without positional encoding is a bag of tokens. It trains, the loss falls,
+and it has learned something strictly weaker than you think. Nothing errors. These modules
+are not optional garnish.
+
+| Member | Description |
+| --- | --- |
+| `nn.SinusoidalPositions(dim, maxLen)` | Fixed sine/cosine encoding, added to the input. Parameter-free. |
+| `nn.LearnedPositions(maxLen, dim)` | One trainable vector per position. **Note the reversed argument order.** |
+
+| Member | Description |
+| --- | --- |
+| `pos:forward(x, offset?)` → `Tensor` | Add the encoding for positions `offset+1 .. offset+T` to `x`. `x` is `{T, dim}`. |
+| `sinusoidal.table: buffer` | The precomputed table. Read-only in practice. |
+
+`SinusoidalPositions` computes its table once at construction, so it costs one add per
+element at runtime and nothing at all in gradients. It holds **no parameters**, so it
+contributes nothing to `parameters()` — worth knowing when you are matching a parameter
+list against an external exporter.
+
+It is the default over a learned table because it needs no training signal to be correct
+and it extrapolates past the longest sequence seen in training. `LearnedPositions` does
+neither, and cannot represent a position beyond `maxLen` at all, where the sinusoidal form
+merely extrapolates imperfectly. At Roblox model sizes there is rarely enough data to learn
+a position table well.
+
+**The argument orders are inconsistent** — `SinusoidalPositions(dim, maxLen)` against
+`LearnedPositions(maxLen, dim)`. Swapping them does not error at construction; it errors
+later, at the first `forward`, complaining about a feature width you never typed.
+
+### offset, and why generation needs it
+
+`offset` defaults to `0`. When you decode one token at a time, pass the number of positions
+already generated:
+
+```lua
+local x = positions:forward(embed:forward({ id }), n)   -- n = tokens so far
+```
+
+Omit it and every generated token is encoded as position 1, so the model sees a constant
+where the position signal should be. The output stays fluent and stops tracking order.
+
+## Transformer
+
+| Member | Description |
+| --- | --- |
+| `nn.MultiheadAttention(dim, heads, causal?)` | Multi-head self-attention. Pass `causal = true` so position `t` cannot see `t+1`. |
+| `nn.TransformerBlock(dim, heads, causal?, mult?)` | Pre-norm block: attention, then a GELU MLP, each with a residual. `mult` is the feed-forward expansion, default `4`. |
+
+| Member | Description |
+| --- | --- |
+| `attn:forward(x)` → `Tensor` | `x` is `{T, dim}`, returns `{T, dim}`. |
+| `attn.qkv: Linear` · `attn.out: Linear` | The fused QKV projection and the output projection. |
+| `block:forward(x)` → `Tensor` | `x` is `{T, dim}`, returns `{T, dim}`. |
+| `block.norm1` · `block.attn` · `block.norm2` · `block.fc1` · `block.fc2` | The pieces, for inspection. |
+
+`dim` must divide evenly by `heads`. That is checked rather than floored: silently rounding
+the head dimension changes the model you think you built, and `1/sqrt(D)` with the wrong
+`D` is a scale error no gradcheck would notice.
+
+**These take `{T, dim}` — one sequence, no batch dimension**, unlike every other layer in
+`nn`. Batched attention would need a 3D kernel. Until then, loop over sequences.
+
+### One projection, not three
+
+`MultiheadAttention` produces Q, K and V from a single `{dim, 3*dim}` weight, sliced
+afterwards. Three separate `{dim, dim}` `Linear`s measured **73% of a whole forward**:
+three matmuls of width `dim` cost more than one of width `3*dim` — the same arithmetic,
+three times the per-call and per-row overhead, and two extra graph nodes. Slicing is free
+by comparison, at 1% of the same forward.
+
+Heads are slices of that projection rather than separate parameters, for the same reason.
+The QKV projection has **no bias**; the output projection does.
+
+### The block
+
+```
+x = x + attn(norm1(x))
+x = x + mlp(norm2(x))
+```
+
+Pre-norm rather than post-norm, because the residual path stays a clean identity — which is
+what lets a stack train without a warmup schedule. Post-norm needs one, and a warmup
+schedule is a thing to get wrong.
+
+The MLP expands by `mult` and uses `F.gelu`, the tanh approximation, matching every
+reference transformer implementation. `LayerNorm` defaults to `eps = 1e-5`.
+
+```lua
+local blocks = table.create(3)
+for i = 1, 3 do
+    blocks[i] = nn.TransformerBlock.new(128, 4, true)   -- dim, heads, causal
+end
+```
+
+## KV caching
+
+| Member | Description |
+| --- | --- |
+| `attn:newCache(maxLen)` · `block:newCache(maxLen)` → `table` | Allocate a cache for up to `maxLen` positions. |
+| `attn:resetCache(cache)` · `block:resetCache(cache)` → `()` | Forget every stored position, keeping the allocation. |
+| `attn:decode(x, cache)` · `block:decode(x, cache)` → `Tensor` | Feed one position, `{1, dim}`. Returns `{1, dim}`. |
+| `attn:compileDecode(maxLen)` → `(step, reset, length)` | Specialised buffer-only single-token decode. |
+
+Generating `T` tokens without a cache re-runs attention over the entire prefix at every
+step, so the whole generation is **O(T³)**. Measured: 8 tokens 2.9 ms, 16 tokens 11.0 ms,
+32 tokens 43.7 ms — 4x per doubling, exactly cubic. Long replies get visibly slower as they
+go.
+
+A cache stores K and V for every position seen so far, so a step projects only the new
+token and attends over the stored prefix: **O(T) per token, O(T²) overall**. On the
+attention layer alone, 64 tokens went from 182 ms to **3.1 ms**.
+
+`TransformerBlock:decode` is bit-identical to `forward` over the same sequence — verified as
+equality in the test suite, not as a tolerance.
+
+**One cache belongs to one sequence.** Two NPCs generating at once need two caches. Sharing
+one interleaves their contexts, which reads as each NPC finishing the other's sentences.
+
+**Inference only, and it errors otherwise.** `decode` raises if the graph is on. Decoding
+with gradients enabled would retain every step's graph through a buffer that later steps
+overwrite in place, so the backward would differentiate against values that no longer
+exist — wrong numbers, no error. Wrap generation in `nano.noGrad`.
+
+```lua
+local caches = table.create(#blocks)
+for i, b in blocks do
+    caches[i] = b:newCache(256)
+end
+
+nano.noGrad(function()
+    local n = 0
+    local function step(id: number)
+        local x = positions:forward(embed:forward({ id }), n)
+        for i, b in blocks do
+            x = b:decode(x, caches[i])
+        end
+        n += 1
+        return head:forward(x)             -- {1, vocab}
+    end
+    -- ...
+end)
+```
+
+See [Transformers](../guides/transformers.md) for the full generation loop.
+
+### compileDecode
+
+`attn:compileDecode(maxLen)` is to `decode` what `nn.compile` is to `forward`: everything
+fixed at compile time is hoisted, the scratch is allocated once, and the step works in raw
+buffers.
+
+One cached token at `dim = 64` is 20,480 multiply-adds, which at the library's 1.26 ns/MAC
+should take 25.9 us. `decode` measured **42.7 us** — 39% of it per-call cost on a call doing
+very little arithmetic: graph checks, a Tensor per intermediate, four narrows that each
+allocate and copy, and an `F.cat` to rejoin the heads. `compileDecode` skips all of it; the
+head slices are offsets into one buffer, and each head writes straight into its slice of the
+concat scratch, because concatenating along the feature axis *is* writing at an offset.
+
+```lua
+local step, reset, length = attn:compileDecode(256)
+
+nano.noGrad(function()
+    local out = step(features)      -- {number} of dim -> {number} of dim
+    print(length())                 -- positions cached so far
+    reset()
+end)
+```
+
+It takes and returns plain Lua arrays, builds no graph, and holds its own cache internally —
+there is no `cache` argument. Inference only, for the same reason `decode` is. It covers
+attention only, not a whole block; a stacked model still runs its norms, residuals and MLP
+through the ordinary path.
 
 ## Activations
 
