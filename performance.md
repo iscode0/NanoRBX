@@ -64,7 +64,6 @@ Per-change, measured in isolation:
 | KV-cached generation, 64 tokens (attention layer) | **59x** |
 | Fused LayerNorm, forward | **9.1x** |
 | Fused LayerNorm, fwd+bwd | **6.4x** |
-| Fused QKV projection vs three Linears | **~1.6x** of a forward |
 | `transpose` {64,64} fwd+bwd | **5.5x** |
 | `nn.compile` rewrite (batch-1, hidden 64) | **2.45x** |
 | Huber loss fwd+bwd (fused) | **5.8x** |
