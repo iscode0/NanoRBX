@@ -139,9 +139,11 @@ longer exist. Wrap generation in `nano.noGrad`.
 internally and takes no cache argument, so mixing it with `block:newCache` gives you two
 independent caches that disagree about how many positions exist.
 
-**Embedding ids are 1-based.** Nano indexes from 1; most tooling outside it indexes from 0.
-An off-by-one reads the wrong row for every token — no error, and output fluent enough to
-look like a training problem rather than an indexing one.
+**Embedding ids are 1-based, and the range check only half-saves you.** Nano indexes from 1;
+most tooling outside it indexes from 0. `Embedding` errors on an id of `0` — but only when
+that token appears. Every other id is shifted by one and reads a neighbouring row with no
+complaint, so the output stays fluent enough to look like a training problem rather than an
+indexing one.
 
 **`dim` must divide evenly by `heads`.** This one *is* checked, and deliberately: silently
 flooring the head dimension changes the model you think you built, and `1/sqrt(D)` with the
