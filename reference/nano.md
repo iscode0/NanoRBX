@@ -1,98 +1,143 @@
-# nano
+# Nano
 
-The table returned by `require(ReplicatedStorage.Nano)`. Holds every submodule plus
-shorthand for the most-used functions.
+A self-contained machine learning library for Roblox Luau. Neural networks, automatic
+differentiation, and reinforcement learning, with no external dependencies and no HTTP calls.
+Everything runs inside your experience.
+
+**Version 3.4.0**
+
+---
+
+## What Nano is for
+
+Nano trains and runs neural networks inside Roblox. In practice that means one of four things:
+
+| you want to | you need | start at |
+|---|---|---|
+| Predict a number or a category from data you already have | Supervised learning | [Your first model](getting-started.md) |
+| Teach an NPC to do something by trial and error | Reinforcement learning | [RL primer](concepts/rl-primer.md) |
+| Run a trained brain on 100 NPCs at 60 fps | Compiled inference | [Deployment](guides/deployment.md) |
+| Evolve behaviour across a population | Parallel evolution | [parallel](reference/parallel.md) |
+| Generate text from an NPC | Transformers | [Transformers](guides/transformers.md) |
+
+If you have never done any of this before, read [What machine learning actually
+is](concepts/ml-primer.md) first. It assumes no background — no calculus, no statistics, no
+prior ML — and everything else in these docs builds on it.
+
+---
+
+## Install
+
+In Studio, insert `NanoRBX` from the Toolbox — or by asset ID `138581366222476` — then move the Nano ModuleScript into ReplicatedStorage.
 
 ```lua
 local nano = require(game:GetService("ReplicatedStorage").Nano)
 ```
 
-## Modules
+Full details, including the manual tree, are in [Installation](installation.md).
 
-| Member | Description |
-| --- | --- |
-| `nano.Config` | Global gradient switch and the shared seedable RNG. [Reference](config.md) |
-| `nano.Tensor` | Strided storage and reverse-mode autograd. The core. [Reference](tensor.md) |
-| `nano.F` · `nano.functional` | Extra tensor ops, activations, fused kernels. The same table under both names. [Reference](functional.md) |
-| `nano.nn` | Layers, containers, losses, compiled inference. [Reference](nn.md) |
-| `nano.optim` | Optimizers, clipping, LR schedules. [Reference](optim.md) |
-| `nano.rnn` | Recurrent cells, state helpers, sequence runners. [Reference](rnn.md) |
-| `nano.data` | Datasets, batching, scaling, metrics, early stopping. [Reference](data.md) |
-| `nano.rl` | Buffers, GAE, distributions, normalizers. [Reference](rl.md) |
-| `nano.algorithms` | PPO, RecurrentPPO, SAC, DQN. [Reference](algorithms.md) |
-| `nano.train` | Environment protocol, Trainer, diagnostics. [Reference](train.md) |
-| `nano.serialize` | Save and load weights and optimizer state. [Reference](serialize.md) |
-| `nano.parallel` | Actor worker pools and evolution. [Reference](parallel.md) |
+## Documentation map
 
-## Properties
+### Start here
 
-| Member | Description |
-| --- | --- |
-| `nano.VERSION: string` | Version string, currently `"3.4.0"`. |
+| page | what it covers |
+|---|---|
+| [Installation](installation.md) | Getting Nano into your place, correctly |
+| [Getting started](getting-started.md) | Your first working model, line by line |
 
-## Construction shorthand
+### Concepts
 
-| Member | Description |
-| --- | --- |
-| `nano.tensor(data, shape?, requiresGrad?)` → `Tensor` | Alias for `Tensor.new`. |
-| `nano.zeros(shape, requiresGrad?)` → `Tensor` | Alias for `Tensor.zeros`. |
-| `nano.ones(shape, requiresGrad?)` → `Tensor` | Alias for `Tensor.ones`. |
-| `nano.full(shape, value, requiresGrad?)` → `Tensor` | Alias for `Tensor.full`. |
-| `nano.randn(shape, requiresGrad?)` → `Tensor` | Alias for `Tensor.randn`. |
-| `nano.rand(shape, requiresGrad?)` → `Tensor` | Alias for `Tensor.rand`. |
+Read these once. They explain *why* the API looks the way it does, which makes the reference
+pages read as obvious rather than arbitrary.
 
-## Math shorthand
+| page | what it covers |
+|---|---|
+| [What machine learning actually is](concepts/ml-primer.md) | Zero-background introduction: weights, loss, gradients, training |
+| [Tensors and autograd](concepts/autograd.md) | Shapes, the computation graph, leaves vs results, `noGrad` |
+| [Reinforcement learning primer](concepts/rl-primer.md) | Agents, rewards, episodes, why RL is harder than supervised learning |
 
-| Member | Description |
-| --- | --- |
-| `nano.matmul(a, b)` → `Tensor` | Matrix multiply. Alias for `Tensor.matmul`. |
-| `nano.exp(a)` → `Tensor` | Elementwise `e^x`. |
-| `nano.log(a)` → `Tensor` | Elementwise natural log. |
-| `nano.sqrt(a)` → `Tensor` | Elementwise square root. |
-| `nano.abs(a)` → `Tensor` | Elementwise absolute value. |
-| `nano.clamp(a, lo?, hi?)` → `Tensor` | Clamp into range. |
-| `nano.softmax(a, dim?)` → `Tensor` | Softmax, `dim` defaults to the last dimension. |
-| `nano.sum(a, dim?, keepdim?)` → `Tensor` | Sum over everything or one dimension. |
-| `nano.mean(a, dim?, keepdim?)` → `Tensor` | Mean over everything or one dimension. |
-| `nano.cat(tensors, dim?)` → `Tensor` | Concatenate along an existing dimension. |
-| `nano.stack(tensors, dim?)` → `Tensor` | Stack along a new dimension. |
-| `nano.min(a, b)` → `Tensor` | Elementwise minimum of two tensors, differentiable. Computed via `(a+b-|a-b|)/2`, which is exact rather than an approximation. What PPO's clipped surrogate and SAC's twin-critic minimum both need. |
-| `nano.max2(a, b)` → `Tensor` | Elementwise maximum of two tensors, differentiable. Named `max2` because `Tensor.max` is the reduction. |
+### API reference
 
-## Gradient control
+Every module, every public function and field, each with an immediate description.
 
-| Member | Description |
-| --- | --- |
-| `nano.noGrad(fn)` → `T` | Run `fn` with graph construction disabled, then restore the previous state. Nested calls compose, and it restores on error. |
-| `nano.gradcheck(fn, ...)` → `(boolean, number)` | Compare a backward pass against a central finite difference. Returns whether it passed and the worst relative error. |
+| module | contents |
+|---|---|
+| [nano](reference/nano.md) | The top-level table: shorthand, save/load, version |
+| [Config](reference/config.md) | Global gradient switch, seeding, the shared RNG |
+| [Tensor](reference/tensor.md) | The core: storage, arithmetic, reductions, autograd |
+| [functional](reference/functional.md) | Extra tensor ops, activations, fused kernels, init |
+| [nn](reference/nn.md) | Layers, containers, transformers, losses, compiled inference |
+| [optim](reference/optim.md) | SGD, Adam, AdamW, RMSprop, clipping, LR schedules |
+| [rnn](reference/rnn.md) | RNN / LSTM / GRU cells, state helpers, sequence runners |
+| [data](reference/data.md) | Datasets, batching, scaling, metrics, early stopping |
+| [rl](reference/rl.md) | Buffers, GAE, distributions, normalizers, target networks |
+| [algorithms](reference/algorithms.md) | PPO, SAC, DQN, RecurrentPPO — assembled and correct |
+| [train](reference/train.md) | Environment protocol, Trainer, diagnostics |
+| [serialize](reference/serialize.md) | Saving and loading weights, quantized transport, optimizer state |
+| [parallel](reference/parallel.md) | Actor worker pools, weight transport, evolution |
 
-## Randomness
+### Guides
 
-| Member | Description |
-| --- | --- |
-| `nano.seed(value?)` → `()` | Seed every random source in Nano. Pass nothing to reseed unpredictably. |
-| `nano.random()` → `number` | Uniform in `[0, 1)` from the shared seeded stream. |
-| `nano.gaussian()` → `number` | One standard normal from the shared seeded stream. |
+| page | what it covers |
+|---|---|
+| [Supervised learning walkthrough](guides/supervised.md) | A real classifier, from raw data to evaluated model |
+| [Training an NPC with RL](guides/rl-agent.md) | Environment, agent, Trainer, and what the numbers mean |
+| [Deploying a trained model](guides/deployment.md) | Saving, loading, `nn.compile`, running many NPCs |
+| [Transformers](guides/transformers.md) | Attention, positional encoding, KV-cached generation |
+| [Training externally](guides/training-externally.md) | Train on a GPU in PyTorch, ship the weights into Roblox |
+| [Extending Nano](guides/extending.md) | Custom ops and custom layers, gradchecked |
 
-`nano.seed` covers tensor initialisation, dropout masks, exploration noise, replay
-sampling, epsilon-greedy, GA mutation, minibatch order and dataset splits. Passing an
-explicit seed to `Dataset:split` gives that split a private stream instead, so it stays
-identical even if the amount of global randomness drawn beforehand changes.
+### Reference material
 
-## Diagnostics and deployment
+| page | what it covers |
+|---|---|
+| [Performance](performance.md) | What is fast, what is slow, and what was measured |
+| [Gotchas](gotchas.md) | Every mistake that produces wrong results without an error |
 
-| Member | Description |
-| --- | --- |
-| `nano.diagnose(model, options?)` → `table` | Alias for `train.diagnose`. Weight and gradient norms, non-finite counts, named problems. |
-| `nano.compile(model)` → `function?` | Alias for `nn.compile`. Compile a `Sequential` into an allocation-free forward, or `nil` if unsupported. |
+---
 
-## Save and load
+## Installing
 
-| Member | Description |
-| --- | --- |
-| `nano.save(model, metadata?)` → `table` | Alias for `serialize.toTable`. |
-| `nano.load(model, state)` → `boolean` | Alias for `serialize.fromTable`. |
+Toolbox: search `NanoRBX` or asset ID `138581366222476`, then move the `Nano` ModuleScript
+into `ReplicatedStorage`.
 
-For agents rather than bare models use
-[`algorithms.save` / `algorithms.load`](algorithms.md), which also round-trip
-observation-normaliser state.
+Wally:
+
+```toml
+[dependencies]
+Nano = "iscode0/nano@3.4.0"
+```
+
+Rojo, from source: point a `$path` at `src`, or `rojo build -o Nano.rbxmx` to produce the
+model. Full details, including the one edit `parallel` users need to make under Wally, are
+in [Installation](installation.md).
+
+---
+
+## The shape of every program
+
+Nano has one core loop. Supervised learning, reinforcement learning, and everything else are
+variations on it:
+
+```lua
+opt:zeroGrad()                              -- clear last step's gradients
+local loss = criterion:forward(model:forward(X), Y)   -- how wrong are we?
+loss:backward()                             -- how should each weight change?
+opt:step()                                  -- change them
+```
+
+Four lines. If you understand what each one does, you can read every example in these docs.
+[Getting started](getting-started.md) explains them one at a time.
+
+---
+
+## A note on silent failure
+
+Machine learning code fails quietly. A wrong gradient does not throw an error — it trains a
+slightly wrong model, and you spend a week blaming your learning rate. Nano is built around that
+fact: it validates arguments aggressively, refuses to guess between `terminated` and `truncated`,
+errors on architecture mismatch when loading weights, and ships a gradient checker you should
+run after touching anything differentiable.
+
+The [Gotchas](gotchas.md) page is a list of every failure mode found so far that produces wrong
+answers instead of errors. It is worth reading before you need it.
